@@ -133,34 +133,48 @@ AURA uses Android's **Accessibility Service** to observe and control any app on 
 - **ML / On-Device**: TensorFlow Lite, ONNX Runtime, Google ML Kit (OCR)
 - **Storage**: Room / SQLite (encrypted), Android Keystore
 
-### AI & LLM
+### AI & LLM — 100% Free MVP Stack
 
-| Model | Provider | Mode | License |
+| Model | Provider | Mode | Free Tier | Speed |
+|---|---|---|---|---|
+| **Llama 3.3 70B** | **Groq** | Cloud API | 14,400 req/day FREE | 300+ tok/s |
+| **Mixtral 8x7B** | **Groq** | Cloud API | 14,400 req/day FREE | Ultra fast |
+| **Gemma 2 9B** | **Groq** | Cloud API | 14,400 req/day FREE | Fast |
+| **Gemini 1.5 Flash** | Google AI Studio | Cloud API | 1M tokens/day FREE | Fast |
+| **Gemma 2B** | Google MediaPipe | On-device | Unlimited FREE | Offline |
+| **Phi-3 Mini** | ONNX Runtime | On-device | Unlimited FREE | Offline |
+
+> **Groq is the #1 pick for MVP** — free, insanely fast (fastest LLM inference available), no credit card needed. Use `llama-3.3-70b-versatile` as the default model.
+
+### Speech — 100% Free
+
+| Function | Recommended | Mode | Cost |
 |---|---|---|---|
-| GPT-4o / GPT-4 Turbo | OpenAI | Cloud API | Closed |
-| Claude 3.5 | Anthropic | Cloud API | Closed |
-| Gemini 1.5 Pro | Google Vertex | Cloud API | Closed |
-| **Llama 3** (7B�70B) | Meta / HuggingFace | On-device / Cloud | **Apache 2.0** |
-| **Mistral 7B** | Mistral AI | On-device / Cloud | **Apache 2.0** |
-| **Gemma 2B** | Google | On-device | **Apache 2.0** |
-| **Phi-3 Mini** | Microsoft | On-device | **MIT** |
+| **STT (online)** | Android SpeechRecognizer | On-device | Free |
+| **STT (offline)** | Vosk Android Library | On-device | Free |
+| **Wake Word** | Picovoice Porcupine | On-device | Free (3 keywords) |
+| **TTS** | Android TextToSpeech | On-device | Free |
 
-### Speech
-
-| Function | Option | Mode |
-|---|---|---|
-| STT | Android SpeechRecognizer | On-device |
-| STT | OpenAI Whisper | On-device / Cloud |
-| STT | Vosk / DeepSpeech | On-device (offline) |
-| TTS | Android TextToSpeech | On-device |
-| TTS | Google Cloud TTS | Cloud |
-| Wake Word | Picovoice Porcupine | On-device |
-
-### Backend (Optional)
-- **Framework**: Python FastAPI or Node.js Express
-- **LLM SDK**: OpenAI SDK, Anthropic SDK, Hugging Face Transformers
-- **CI/CD**: GitHub Actions, Fastlane
+### Backend (Optional) — 100% Free
+- **Framework**: Python FastAPI
+- **LLM SDK**: `groq` Python SDK (`pip install groq`) + Google `generativeai`
+- **Vector Memory**: ChromaDB (local, free, no server needed)
+- **Hosting**: Railway.app free tier or Render free tier
+- **CI/CD**: GitHub Actions (free for public repos)
+- **Crash Reporting**: Firebase Crashlytics (free tier)
 - **Testing**: JUnit, Mockito, Espresso, UI Automator, PyTest
+
+### MVP Cost Breakdown — $0/month
+
+| Service | Free Limit |
+|---|---|
+| Groq API (Llama 3.3 70B) | 14,400 requests/day |
+| Gemini 1.5 Flash | 1,000,000 tokens/day |
+| Android SpeechRecognizer | Unlimited |
+| Picovoice Porcupine | 3 wake words free |
+| Railway / Render hosting | Free tier |
+| Firebase Crashlytics | Free tier |
+| GitHub Actions CI/CD | Free for public repos |
 
 ---
 
