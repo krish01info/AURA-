@@ -412,21 +412,339 @@ data class MemoryEntry(
 
 ---
 
-## Phase 6 — App Skill Packs (Weeks 9–10)
+## Phase 6 — Dynamic Skill Pack System (Weeks 9–10)
 
-**Goal:** Pre-built optimized flows for top apps — faster and more reliable than raw LLM planning.
+**Goal:** A self-growing, community-powered skill library. AURA auto-learns new skills from every successful LLM task and shares them with all users via a cloud database.
+
+> **Why not static JSON files?** Hardcoded files need manual maintenance, break when apps update, and don't benefit from what other users discover. The dynamic system self-heals, self-grows, and gets smarter with every user.
+
+---
+
+### Architecture Overview
+
+```
+User Command
+      |
+      v
+SkillRouter: check local Room DB
+      |
+   ┌──┴──┐
+  FOUND  NOT FOUND
+   |          |
+   v          v
+Execute    Check Supabase
+instantly  Cloud DB
+   |          |
+   |      ┌───┴───┐
+   |    FOUND    NOT FOUND
+   |      |          |
+   |   Download   Groq LLM
+   |   + cache    plans it
+   |      |          |
+   |      v          v
+   |   Execute    Execute
+   |                 |
+   |            Did it work?
+   |                 |
+   |            ┌────┴────┐
+   |           YES        NO
+   |            |        Retry
+   |            v        /fail
+   └──> AUTO-SAVE as new skill
+              |
+              v
+       Push to Supabase
+       (other users benefit)
+```
+
+---
 
 ### Tasks
 
-- [ ] Design SkillPack JSON schema
-- [ ] Build SkillRouter — matches intent to skill pack before calling LLM
-- [ ] WhatsApp skill: send message, call, read last message
-- [ ] Google Pay / PhonePe skill: send money via UPI
-- [ ] Zomato / Swiggy skill: reorder last order
-- [ ] Google Maps skill: navigate to contact location
-- [ ] Gmail skill: compose and send email
-- [ ] YouTube skill: search and play video
-- [ ] Skill pack versioning and auto-update via GitHub releases
+- [ ] Set up `SkillPackDatabase` — Room DB with local skill cache
+- [ ] Set up Supabase project (free tier) — shared cloud skill repository
+- [ ] Build `SkillRepository` — unified local + cloud skill lookup
+- [ ] Build `SkillLearner` — auto-generates skill from every successful LLM task
+- [ ] Build `SkillSyncer` — background sync between local and cloud
+- [ ] Build `SkillUpdater` — detects broken skills, triggers re-learning
+- [ ] Build `SkillRouter` — routes commands to best matching skill
+- [ ] Add community skill browser UI — search, download, rate skills
+- [ ] Seed initial skill packs: WhatsApp, GPay, Zomato, Gmail, Maps, YouTube
+
+---
+
+### Room DB — Local Skill Cache
+
+```kotlin
+@Entity(tableName = "skill_packs")
+data class SkillPackEntity(
+    @PrimaryKey val skillId: String,          // "whatsapp_send_message"
+    val appPackage: String,                   // "com.whatsapp"
+    val triggerKeywords: String,              // JSON: ["whatsapp","message","text"]
+    val parameters: String,                   // JSON: ["contact_name","message_text"]
+    val steps: String,                        // JSON: List<ActionStep>
+    val riskLevel: String,                    // "HIGH"
+    val version: Int = 1,
+    val usageCount: Int = 0,
+    val successRate: Float = 1.0f,
+    val createdBy: String,                    // "local" or "community"
+    val isVerified: Boolean = false,          // community-verified
+    val syncedAt: Long = 0L,                  // last cloud sync timestamp
+    val isStale: Boolean = false              // set true if skill keeps failing
+)
+
+@Dao
+interface SkillPackDao {
+    @Query("SELECT * FROM skill_packs ORDER BY usageCount DESC")
+    fun getAllSkills(): Flow<List<SkillPackEntity>>
+
+    @Query("SELECT * FROM skill_packs WHERE triggerKeywords LIKE '%' || :keyword || '%'")
+    suspend fun findByKeyword(keyword: String): List<SkillPackEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(skill: SkillPackEntity)
+
+    @Query("UPDATE skill_packs SET isStale = 1 WHERE skillId = :id")
+    suspend fun markStale(id: String)
+}
+```
+
+---
+
+### Supabase Cloud Schema
+
+```sql
+-- Shared skill repository for all AURA users
+CREATE TABLE skill_packs (
+    skill_id         TEXT PRIMARY KEY,
+    app_package      TEXT NOT NULL,
+    trigger_keywords JSONB NOT NULL,
+    parameters       JSONB NOT NULL,
+    steps            JSONB NOT NULL,
+    risk_level       TEXT NOT NULL,
+    version          INT DEFAULT 1,
+    usage_count      INT DEFAULT 0,      -- across ALL users globally
+    success_rate     FLOAT DEFAULT 1.0,
+    downloads        INT DEFAULT 0,
+    created_by       TEXT,
+    is_verified      BOOLEAN DEFAULT false,
+    tags             TEXT[],
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for fast keyword search
+CREATE INDEX idx_skill_keywords ON skill_packs USING GIN (trigger_keywords);
+```
+
+---
+
+### SkillRepository — Unified Lookup
+
+```kotlin
+@Singleton
+class SkillRepository @Inject constructor(
+    private val localDao: SkillPackDao,
+    private val cloudApi: SupabaseSkillApi
+) {
+    // 1. Check local first (instant, offline)
+    // 2. Fall back to cloud if not found locally
+    // 3. Cache cloud result locally for next time
+    suspend fun findSkill(goal: String): SkillPackEntity? {
+        val keywords = extractKeywords(goal)
+
+        // Step 1: local DB lookup
+        for (keyword in keywords) {
+            val local = localDao.findByKeyword(keyword)
+            if (local.isNotEmpty()) {
+                val best = local.maxByOrNull { it.successRate * it.usageCount }
+                if (best != null && !best.isStale) return best
+            }
+        }
+
+        // Step 2: cloud lookup
+        val cloudSkill = cloudApi.searchSkill(keywords)
+        if (cloudSkill != null) {
+            localDao.upsert(cloudSkill.toEntity())  // cache locally
+            return cloudSkill.toEntity()
+        }
+
+        return null  // no skill found → LLM will plan it
+    }
+}
+```
+
+---
+
+### SkillLearner — Auto-Learn from Every Successful Task
+
+```kotlin
+@Singleton
+class SkillLearner @Inject constructor(
+    private val localDao: SkillPackDao,
+    private val cloudApi: SupabaseSkillApi
+) {
+    // Called automatically after every successful LLM-planned task
+    suspend fun learnFromSuccess(
+        goal: String,
+        executedSteps: List<ActionStep>,
+        appPackage: String
+    ) {
+        val newSkill = SkillPackEntity(
+            skillId = generateSkillId(goal, appPackage),
+            appPackage = appPackage,
+            triggerKeywords = extractKeywords(goal).toJson(),
+            parameters = extractParameters(executedSteps).toJson(),
+            steps = executedSteps.toJson(),
+            riskLevel = inferRiskLevel(executedSteps),
+            createdBy = "local",
+            version = 1,
+            usageCount = 1,
+            successRate = 1.0f
+        )
+
+        // Save locally immediately (works offline next time)
+        localDao.upsert(newSkill)
+
+        // Upload to cloud for community sharing
+        cloudApi.uploadSkill(newSkill.toCloudModel())
+    }
+}
+```
+
+---
+
+### SkillUpdater — Self-Healing Broken Skills
+
+```kotlin
+@Singleton
+class SkillUpdater @Inject constructor(
+    private val localDao: SkillPackDao,
+    private val cloudApi: SupabaseSkillApi,
+    private val groqClient: GroqClient
+) {
+    // Called when a skill fails execution
+    suspend fun handleFailure(skillId: String, goal: String, uiContext: String) {
+
+        // Mark as stale in local DB
+        localDao.markStale(skillId)
+
+        // Check cloud for newer version
+        val updated = cloudApi.getLatestVersion(skillId)
+
+        if (updated != null && updated.version > localVersion) {
+            // Newer version in cloud — download and use it
+            localDao.upsert(updated.toEntity())
+        } else {
+            // No fix in cloud — re-plan with LLM and save as v+1
+            val newSteps = groqClient.plan(goal, uiContext)
+            val repairedSkill = localDao.getSkill(skillId)
+                ?.copy(steps = newSteps.toJson(), version = localVersion + 1, isStale = false)
+            if (repairedSkill != null) {
+                localDao.upsert(repairedSkill)
+                cloudApi.uploadSkill(repairedSkill.toCloudModel())
+            }
+        }
+    }
+}
+```
+
+---
+
+### SkillRouter — Routes Commands to Best Skill
+
+```kotlin
+@Singleton
+class SkillRouter @Inject constructor(
+    private val skillRepository: SkillRepository,
+    private val groqClient: GroqClient,
+    private val skillLearner: SkillLearner
+) {
+    suspend fun execute(goal: String, uiContext: String): List<ActionStep> {
+        val skill = skillRepository.findSkill(goal)
+
+        return if (skill != null) {
+            // Fast path: use cached skill (no LLM call)
+            skill.toActionSteps(extractParams(goal, skill))
+        } else {
+            // Slow path: LLM generates a plan
+            val llmPlan = groqClient.plan(goal, uiContext)
+
+            // Auto-learn: save this new plan as a skill for next time
+            skillLearner.learnFromSuccess(goal, llmPlan, detectApp(uiContext))
+
+            llmPlan
+        }
+    }
+}
+```
+
+---
+
+### Community Skill Browser (UI)
+
+```
+┌──────────────────────────────────────────┐
+│  🧩 AURA Skill Store                     │
+│                                          │
+│  Search: [whatsapp message ________]     │
+│                                          │
+│  ┌────────────────────────────────────┐  │
+│  │ 📤 WhatsApp Send Message      ✅   │  │
+│  │ Used by 15,420 users · 94% success│  │
+│  │ Tags: messaging · india · popular │  │
+│  │                    [Downloaded ✓] │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ 💳 Google Pay Send Money      ✅   │  │
+│  │ Used by 8,230 users · 91% success │  │
+│  │ Tags: payment · upi · gpay       │  │
+│  │                    [Download ⬇]  │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ 🍕 Zomato Reorder Last Order       │  │
+│  │ Used by 3,120 users · 89% success │  │
+│  │ Tags: food · zomato · reorder     │  │
+│  │                    [Download ⬇]  │  │
+│  └────────────────────────────────────┘  │
+└──────────────────────────────────────────┘
+```
+
+---
+
+### Supabase Setup (Free Tier)
+
+```
+Free Tier Limits:
+  ✅ 500MB database storage
+  ✅ Unlimited API requests
+  ✅ Built-in REST API (no backend needed)
+  ✅ Real-time subscriptions
+  ✅ Row-level security
+
+Android dependency:
+  implementation("io.github.jan-tennert.supabase:postgrest-kt:2.1.0")
+  implementation("io.github.jan-tennert.supabase:realtime-kt:2.1.0")
+```
+
+---
+
+### File Changes vs Old Plan
+
+| Old (Static) | New (Dynamic) |
+|---|---|
+| Hardcoded JSON files | Room DB + Supabase cloud |
+| Manually maintained | Auto-learned from every task |
+| One developer adds skills | Every user auto-contributes |
+| Breaks when app updates | Self-heals via LLM re-planning |
+| No sharing | Full community skill marketplace |
+
+---
+
+### Deliverable
+> WhatsApp message works instantly from local cache. New unknown commands auto-create skills shared with all users. Broken skills auto-repair.
+
+
 
 ### Skill Pack Schema
 

@@ -57,8 +57,14 @@ Everything else is **post-MVP**.
 | Groq API integration | Llama 3.3 70B via Groq (free, 300+ tok/s) |
 | Intent parsing | Natural language → structured goal |
 | Action planning | Goal → ordered list of action steps |
-| WhatsApp skill pack | Pre-built optimized flow (no LLM needed) |
-| Google Pay skill pack | Pre-built UPI payment flow |
+| **Dynamic Skill System** | Self-learning skill library — auto-creates skills from every successful LLM task |
+| **Local Skill Cache (Room DB)** | Downloaded/learned skills cached locally for instant offline use |
+| **Cloud Skill Store (Supabase)** | Skills auto-uploaded and shared with all AURA users — free tier |
+| **SkillRouter** | Checks local cache first → then cloud → then LLM (in that order) |
+| **SkillLearner** | After every successful LLM task, auto-saves it as a reusable skill |
+| **SkillUpdater** | When a skill fails, marks stale → downloads fix from cloud → LLM re-plans if needed |
+| WhatsApp skill (seeded) | Pre-seeded starter skill for send message flow |
+| Google Pay skill (seeded) | Pre-seeded starter skill for UPI payment flow |
 | Gemini 1.5 Flash fallback | Backup if Groq is unavailable |
 
 ### Layer 3 — Safety (Non-Negotiable)
@@ -136,9 +142,13 @@ Week 4  ─── Phase 2a: Groq LLM Integration
               Prompt injection defense from day one
               Test: typed command → plan generated → executed
 
-Week 5  ─── Phase 2b: Skill Packs + Voice
-              WhatsApp skill pack (send message)
-              Google Pay skill pack (send money)
+Week 5  ─── Phase 2b: Dynamic Skill System + Voice
+              Room DB local skill cache setup
+              Supabase cloud skill store setup (free tier)
+              SkillRouter: local → cloud → LLM lookup chain
+              SkillLearner: auto-save every successful LLM task as skill
+              SkillUpdater: detect and repair broken skills
+              Seed 2 starter skills: WhatsApp + Google Pay
               SpeechRecognizer integration (tap-to-speak)
               TTS narration during execution
 
