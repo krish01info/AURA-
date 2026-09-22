@@ -412,7 +412,149 @@ data class MemoryEntry(
 
 ---
 
+## Architecture Decision — Dynamic Skills vs MCP
+
+> **Decision Record**: This section documents the key architectural choice made for the skill system and how it evolves over time. Read before implementing Phase 6.
+
+---
+
+### What Each Approach Solves
+
+```
+Dynamic Skill System answers:
+  "How does AURA REMEMBER and REUSE what it learned?"
+  → Speed, self-healing, community sharing, offline use
+
+MCP (Model Context Protocol) answers:
+  "How does the LLM CALL TOOLS in a structured, pluggable way?"
+  → Modularity, LLM-agnostic interfaces, open ecosystem
+```
+
+These solve problems at **different layers** — they are not competitors.
+
+---
+
+### Comparison Table
+
+| | Dynamic Skill System | MCP Architecture |
+|---|---|---|
+| **What it is** | Learning + caching + sharing system | Protocol for structured LLM tool calling |
+| **Problem solved** | Speed, reliability, community growth | Modularity, LLM-agnostic tool calls |
+| **Android ready?** | Yes — Room + Supabase | No Android SDK — DIY HTTP needed |
+| **MVP complexity** | Medium — 1–2 weeks | High — 3–4 weeks |
+| **Self-healing** | Yes — auto-repairs broken flows | No — MCP doesn't learn |
+| **Community sharing** | Yes — Supabase cloud | Yes — publish MCP servers |
+| **Offline support** | Yes — Room DB cache | Harder — HTTP servers on device |
+| **Auto-learning** | Yes — every task teaches AURA | No — static tool definitions |
+| **Unique to AURA?** | Yes — nobody else does auto-learning | No — MCP exists everywhere |
+| **LLM flexibility** | Works with any LLM | Works with any MCP-compatible LLM |
+
+---
+
+### Why Dynamic Skills Wins for MVP
+
+```
+With Dynamic Skill System:
+
+  Day 1:  User says "Book Ola to airport"
+          No skill found → Groq plans it → Succeeds
+          AUTO-SAVED as "ola_book_cab" skill locally + cloud
+
+  Day 2:  Same user says "Book Ola to office"
+          Skill found in Room DB → runs in 0.3 seconds
+          No LLM call needed. Zero latency.
+
+  Day 3:  1,000 other users benefit from the auto-uploaded skill
+          AURA gets smarter on its own — no developer needed
+
+With MCP alone:
+
+  Day 1:  LLM calls ola_server.book_cab() → Works
+  Day 2:  LLM calls ola_server.book_cab() → Same speed as Day 1
+          No learning. No improvement.
+  Day 3:  Nothing changes unless a developer writes an Ola MCP server
+```
+
+**Dynamic Skills = learns and improves. MCP = structured but static.**
+
+---
+
+### The Ideal — Both Together (3-Stage Plan)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                AURA Architecture Evolution               │
+│                                                          │
+│  STAGE 1 — MVP (Weeks 1–6)                               │
+│  ─────────────────────────                               │
+│  Dynamic Skill System ONLY                               │
+│  Room DB + Supabase + SkillLearner                       │
+│  LLM outputs JSON actions directly                       │
+│  Simple, fast, unique, Android-ready                     │
+│                                                          │
+│  STAGE 2 — Post-MVP (Phase 7–8)                          │
+│  ─────────────────────────────                           │
+│  Add MCP-inspired tool calling layer                     │
+│  Skills registered as "tools" the LLM can pick          │
+│  LLM: "I will call tool: send_whatsapp_message"          │
+│  Cleaner LLM integration, structured responses           │
+│  Dynamic Skill DB becomes the tool registry              │
+│                                                          │
+│  STAGE 3 — v2.0 (Future)                                 │
+│  ──────────────────────                                  │
+│  Full MCP protocol when Android SDK matures              │
+│  Each skill pack = publishable MCP server                │
+│  Works with Claude Desktop, any MCP host                 │
+│  AURA becomes a platform, not just an app                │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Stage 2 Architecture (MCP-Inspired Layer)
+
+```kotlin
+// Stage 2: Skills exposed as MCP-style tools
+data class AuraTool(
+    val name: String,          // "send_whatsapp_message"
+    val description: String,   // used in LLM system prompt
+    val parameters: Schema,    // JSON schema of inputs
+    val riskLevel: RiskLevel,
+    val handler: SkillPackEntity  // backed by dynamic skill DB
+)
+
+// LLM picks the tool, Dynamic Skill executes it
+class MCPInspiredPlanner @Inject constructor(
+    private val skillRepo: SkillRepository,
+    private val groqClient: GroqClient
+) {
+    suspend fun plan(goal: String, uiContext: String): List<ActionStep> {
+        // Build tool list from dynamic skill DB for LLM context
+        val availableTools = skillRepo.getAllAsTools()
+
+        // LLM selects which tool to call (structured output)
+        val toolCall = groqClient.selectTool(goal, availableTools)
+
+        // Execute via dynamic skill system
+        return skillRepo.executeSkill(toolCall.name, toolCall.args)
+    }
+}
+```
+
+---
+
+### Decision Summary
+
+| Phase | Approach | Reason |
+|---|---|---|
+| **MVP (now)** | Dynamic Skill System only | Fast to build, unique, self-improving, Android-ready |
+| **Post-MVP** | Dynamic Skills + MCP-inspired interface | Structured tool calling, cleaner LLM integration |
+| **v2.0** | Full MCP protocol | Open ecosystem, community MCP server publishing |
+
+> **Rule**: Never replace the Dynamic Skill System. MCP is a calling convention that sits on top of it. Dynamic Skills are what make AURA unique — they are always the source of truth.
+
+---
+
 ## Phase 6 — Dynamic Skill Pack System (Weeks 9–10)
+
 
 **Goal:** A self-growing, community-powered skill library. AURA auto-learns new skills from every successful LLM task and shares them with all users via a cloud database.
 
