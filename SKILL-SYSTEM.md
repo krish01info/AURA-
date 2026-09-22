@@ -825,7 +825,277 @@ data class SkillPackEntity(
 6. **Device-scope, don't duplicate** — use multi-strategy steps instead of separate skills per device
 7. **Community verifies, usage validates** — verified badge requires real usage data, not just votes
 8. **Silent updates** — skill updates happen in background, never interrupt user
+9. **RAM first** — top 20 most-used skills preloaded into memory at startup
+10. **User rules override everything** — personal permission rules always take priority over global policy
+
+---
+
+## 3-Layer Cache — RAM + Disk + Cloud
+
+AURA stores skills you use personally in a 3-layer cache. The most-used skills are preloaded into **RAM at startup** so they execute with zero disk I/O.
+
+### Cache Architecture
+
+```
+SPEED:  Instant (< 1ms)      Fast (5–15ms)      Slow (300ms+)
+              │                    │                  │
+              ▼                    ▼                  ▼
+       ┌─────────────┐     ┌─────────────┐     ┌──────────┐
+       │  L1 Cache   │     │  L2 Cache   │     │ L3 Cloud │
+       │   (RAM)     │     │  (Room DB)  │     │ Supabase │
+       │             │     │             │     │          │
+       │ YOUR top 20 │     │ ALL skills  │     │ Community│
+       │ most-used   │     │ you've ever │     │ skills   │
+       │ skills      │     │ used/saved  │     │          │
+       └─────────────┘     └─────────────┘     └──────────┘
+       Max: 20 skills       Max: Unlimited       Unlimited
+       LRU eviction         Persists forever     Sync on demand
+```
+
+### L1 Cache (SkillCache.kt)
+
+```kotlin
+@Singleton
+class SkillCache @Inject constructor(
+    private val localDao: SkillPackDao
+) {
+    // LRU map — least recently used skill auto-evicted when full
+    private val hotCache = LinkedHashMap<String, SkillPackEntity>(
+        20, 0.75f, true  // accessOrder = true enables LRU behaviour
+    )
+
+    // Called ONCE at app startup — fills RAM with your top skills
+    suspend fun warmUp() {
+        val yourTopSkills = localDao.getTopSkillsByUsage(limit = 20)
+        yourTopSkills.forEach { hotCache[it.skillId] = it }
+    }
+
+    // Instant RAM lookup — no disk, no network
+    fun get(keyword: String): SkillPackEntity? =
+        hotCache.values.firstOrNull {
+            it.triggerKeywords.contains(keyword) && !it.isStale
+        }
+
+    // Promote a skill from disk to RAM
+    fun promote(skill: SkillPackEntity) {
+        if (hotCache.size >= 20) hotCache.remove(hotCache.keys.first())
+        hotCache[skill.skillId] = skill
+    }
+
+    // Bump usage — keeps frequently used skills at top of LRU
+    fun recordHit(skillId: String) {
+        hotCache[skillId]?.let {
+            hotCache[skillId] = it.copy(usageCount = it.usageCount + 1)
+        }
+    }
+}
+```
+
+### Lookup Chain — L1 → L2 → L3
+
+```kotlin
+suspend fun findSkill(goal: String): SkillPackEntity? {
+    val keywords = extractKeywords(goal)
+
+    // L1: RAM — instant, no I/O
+    keywords.forEach { keyword ->
+        hotCache.get(keyword)?.let { hit ->
+            hotCache.recordHit(hit.skillId)
+            return hit
+        }
+    }
+
+    // L2: Room DB — fast, disk only
+    keywords.forEach { keyword ->
+        localDao.findByKeyword(keyword)
+            .filter { !it.isStale }
+            .maxByOrNull { scoreSkill(it, goal) }
+            ?.let { hit ->
+                hotCache.promote(hit)   // next time: instant from RAM
+                return hit
+            }
+    }
+
+    // L3: Supabase cloud — slow, network
+    cloudApi.searchSkill(keywords)?.let { cloudHit ->
+        val entity = cloudHit.toEntity()
+        localDao.upsert(entity)         // persist to disk
+        hotCache.promote(entity)        // load into RAM
+        return entity
+    }
+
+    return null  // LLM takes over
+}
+```
+
+### Performance
+
+| Layer | Speed | When Used |
+|---|---|---|
+| L1 RAM cache | < 1ms | Your top 20 skills |
+| L2 Room DB | 5–15ms | Any locally stored skill |
+| L3 Supabase | 300–800ms | New skill, first time |
+| Groq LLM | 1,000–3,000ms | No skill found anywhere |
+
+```
+Your daily WhatsApp message:
+  First ever use  → 2,000ms  (LLM plans it, auto-saved)
+  Next time       → 10ms     (Room DB)
+  After 5 uses    → <1ms     (promoted to RAM hot cache)
+  Every day after → <1ms     (stays in RAM on startup warmup)
+```
+
+---
+
+## App-Action Permission Manager
+
+You control exactly what AURA is allowed to do — per app, per action, with optional conditions. This is your **personal firewall for AURA**.
+
+### Permission Levels
+
+```
+ALWAYS ALLOW    → Execute without any dialog
+                  "I trust this 100%, just do it"
+
+ALWAYS CONFIRM  → Show approval dialog every single time
+                  "Ask me, I want to stay in control"
+
+ALWAYS DENY     → Blocked. AURA refuses and explains why
+                  "Never allowed — not even if I ask"
+
+DEFAULT         → Follow global PolicyEngine risk level
+                  (LOW=auto, HIGH=confirm, CRITICAL=biometric)
+```
+
+### PermissionRule Data Model
+
+```kotlin
+@Entity(tableName = "permission_rules")
+data class PermissionRule(
+    @PrimaryKey val ruleId: String = UUID.randomUUID().toString(),
+
+    // Scope — null means "any"
+    val appPackage: String?,            // "com.whatsapp" | null = any app
+    val intentAction: String?,          // "send_message"  | null = any action
+
+    // The decision
+    val permission: Permission,
+
+    // Optional conditions — rule only fires when ALL match
+    val maxAmount: Double? = null,              // for payment actions
+    val allowedContacts: List<String>? = null, // only for these people
+    val allowedTimeStart: String? = null,       // "09:00"
+    val allowedTimeEnd: String? = null,         // "22:00"
+
+    val priority: Int = 0,              // higher = evaluated first
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+enum class Permission { ALWAYS_ALLOW, ALWAYS_CONFIRM, ALWAYS_DENY }
+```
+
+### PermissionEngine — Evaluation Order
+
+```kotlin
+suspend fun evaluate(action: ActionStep, appPackage: String): PermissionDecision {
+
+    // Most specific rule wins (highest priority first)
+    val rules = rulesDao.findRules(appPackage, action.action)
+        .sortedByDescending { it.priority }
+
+    for (rule in rules) {
+        if (ruleApplies(rule, action)) {
+            return when (rule.permission) {
+                ALWAYS_ALLOW   -> PermissionDecision.Allow
+                ALWAYS_CONFIRM -> PermissionDecision.Confirm
+                ALWAYS_DENY    -> PermissionDecision.Deny(
+                    "You have blocked '${action.action}' for $appPackage"
+                )
+            }
+        }
+    }
+
+    // No user rule matched → global PolicyEngine default
+    return policyEngine.defaultDecision(action)
+}
+```
+
+### Rule Priority Example
+
+```
+Action: GPay → send_money → Rahul → ₹300
+
+Rules checked in order:
+  P4: app=gpay + action=send_money + contact=Rahul  → ALWAYS ALLOW  ← WINS
+  P3: app=gpay + action=send_money + amount ≤ 500   → (would also match)
+  P2: app=gpay + action=send_money                  → ALWAYS CONFIRM
+  P1: app=null + action=send_money                  → ALWAYS CONFIRM
+  P0: global default                                → CRITICAL → biometric
+
+Result: Rahul gets paid without any dialog (user set it)
+```
+
+### Blocked Apps — Full App Lockout
+
+Beyond per-action rules, you can block entire apps. AURA will refuse any interaction:
+
+```kotlin
+@Entity(tableName = "blocked_apps")
+data class BlockedApp(
+    @PrimaryKey val appPackage: String,   // "com.sbi.lotusintouch"
+    val reason: String,                   // "Banking — too sensitive"
+    val blockedAt: Long
+)
+
+// Checked before executing ANY action
+if (blockedAppsDao.isBlocked(appPackage)) {
+    throw ActionDeniedException(
+        "AURA is blocked from $appPackage. Change in Settings → Permissions."
+    )
+}
+```
+
+### Permission Manager UI
+
+```
+┌──────────────────────────────────────────────────┐
+│  🔐 App Permissions                    [+ Rule]  │
+│                                                  │
+│  ─── WhatsApp ────────────────────────────────  │
+│  📤 Send Message          [ALWAYS ALLOW    ▼]   │
+│  📞 Make Call             [ALWAYS CONFIRM  ▼]   │
+│  🗑 Delete Message        [ALWAYS DENY     ▼]   │
+│                                                  │
+│  ─── Google Pay ──────────────────────────────  │
+│  💳 Send Money            [ALWAYS CONFIRM  ▼]   │
+│     Conditions:                                 │
+│       Max amount: ₹500                          │
+│       Contacts:   Rahul, Mom, Dad               │
+│       Time:       09:00 → 22:00                 │
+│                                                  │
+│  ─── Global Rules ────────────────────────────  │
+│  🌐 Any app → Delete account  [ALWAYS DENY  ▼]  │
+│  🌐 Any app → Purchase item   [ALWAYS CONFIRM▼] │
+│                                                  │
+│  ─── Blocked Apps ────────────────────────────  │
+│  🚫 SBI Yono, HDFC Bank       [FULLY BLOCKED]   │
+└──────────────────────────────────────────────────┘
+```
+
+### Example Rules Users Might Set
+
+| App | Action | Rule | Condition |
+|---|---|---|---|
+| WhatsApp | send_message | ALWAYS ALLOW | — |
+| WhatsApp | make_call | ALWAYS CONFIRM | — |
+| Google Pay | send_money | ALWAYS ALLOW | amount ≤ ₹200, contact = Rahul |
+| Google Pay | send_money | ALWAYS CONFIRM | amount ≤ ₹2,000 |
+| Google Pay | send_money | ALWAYS DENY | amount > ₹2,000 |
+| Zomato | place_order | ALWAYS ALLOW | time 12:00–14:00 |
+| ANY app | delete_account | ALWAYS DENY | — |
+| SBI Yono | ANY | FULLY BLOCKED | — |
 
 ---
 
 *AURA Skill System v1.0 — Self-learning, self-healing, community-powered*
+
