@@ -2,7 +2,7 @@
 
 <img src="https://img.shields.io/badge/AURA-Autonomous%20Android%20Agent-6C63FF?style=for-the-badge&logo=android&logoColor=white"/>
 
-# ?? AURA � Autonomous Universal Reasoning Agent
+#  AURA  Autonomous Universal Relief Agent
 
 > **A secure, permission-gated AI agent that understands what you mean � and gets it done across any Android app.**
 
