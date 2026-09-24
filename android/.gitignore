@@ -1,0 +1,25 @@
+# ── Android / Gradle ─────────────────────────────────────────────────────────
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+
+# ── API keys / secrets — NEVER commit these ─────────────────────────────────
+local.properties
+google-services.json
+*.keystore
+*.jks
+.env
+.env.*
+
+# ── OS cruft ─────────────────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini

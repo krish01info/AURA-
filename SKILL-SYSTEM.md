@@ -409,9 +409,53 @@ Skill B: "whatsapp_message_v2" (local, newer but unproven)
 
 ---
 
-## Device-Scoped Skills
+## Device-Scoped Skills — OS-Classified Skill System
 
-Skills can target specific device models or Android versions to handle UI differences across phones:
+Skills are classified by **Android OS version** because different OS versions have different system UIs, accessibility behaviors, permission models, and even app layouts. When a user installs AURA, they should **only download skills that work on their specific OS** — not every skill ever created.
+
+### Why OS Classification Matters
+
+```
+Android 10 (API 29)  →  Legacy gesture nav, different notification panel
+Android 11 (API 30)  →  Scoped storage, one-time permissions, conversation section
+Android 12 (API 31)  →  Material You, new widgets API, splash screen API
+Android 13 (API 33)  →  Per-app language, photo picker, notification permissions
+Android 14 (API 34)  →  Predictive back, credential manager, lock screen customization
+Android 15 (API 35)  →  Private space, partial screen sharing, new edge-to-edge
+
+The same app can look and behave VERY differently across these versions.
+A WhatsApp skill that works on Android 12 might fail on Android 15.
+```
+
+### OS Tier Classification
+
+Every skill is tagged with an **OS compatibility tier** — not just a single API level, but a **range** of supported versions:
+
+```kotlin
+data class OsCompatibility(
+    val minApiLevel: Int,             // minimum supported (e.g. 29 = Android 10)
+    val maxApiLevel: Int?,            // maximum supported (null = no upper limit)
+    val targetApiLevel: Int,          // the OS it was created/tested on
+    val osSkin: String? = null,       // "MIUI" | "OneUI" | "OxygenOS" | "ColorOS" | "stock" | null
+    val skinVersion: String? = null   // "15.0" | "6.1" | null
+)
+```
+
+### OS-Specific Behavior Differences
+
+| Behavior | Android 10–11 | Android 12–13 | Android 14–15 |
+|---|---|---|---|
+| Notification access | `NotificationListenerService` | Same + Conversation section | Same + priority channels |
+| Gesture navigation | 3-button or 2-button | Gesture default | Predictive back gesture |
+| Permission prompts | One-time / always | Same + approximate location | Credential Manager replaces some |
+| App launch splash | Custom activity | `SplashScreen` API mandatory | Same |
+| Share sheet | System share sheet | Same | Custom actions in share sheet |
+| Settings navigation | `Settings.ACTION_*` intents | Redesigned settings UI | Further redesigned |
+| Quick Settings tiles | Standard tiles | Material You tiles | Restyled tiles |
+
+Skills that interact with **system UI, settings, notifications, or permissions** are most affected by OS differences.
+
+### Expanded SkillPackEntity — OS Fields
 
 ```kotlin
 @Entity(tableName = "skill_packs")
@@ -421,14 +465,21 @@ data class SkillPackEntity(
     val intentCategory: String,
     val intentAction: String,
 
-    // Device scoping — null means "works on all devices"
-    val deviceModel: String? = null,       // "SM-G991B" | null
-    val androidApiLevel: Int? = null,      // 34 | null
-    val appVersion: String? = null,        // "2.24.1.76" | null
+    // === OS Classification (NEW) ===
+    val minApiLevel: Int = 29,         // minimum Android API supported
+    val maxApiLevel: Int? = null,      // null = supports all future versions
+    val targetApiLevel: Int,           // the OS this skill was built/tested on
+    val osSkin: String? = null,        // "MIUI" | "OneUI" | "stock" | null (any skin)
+    val skinVersion: String? = null,   // "15.0" | "6.1" | null
+    val osClassTag: String,            // "android_12_13" | "android_14_plus" | "universal"
 
-    val triggerKeywords: String,           // JSON list
-    val parameters: String,               // JSON schema
-    val steps: String,                    // JSON List<ActionStep>
+    // === Device scoping ===
+    val deviceModel: String? = null,   // "SM-G991B" | null
+    val appVersion: String? = null,    // "2.24.1.76" | null
+
+    val triggerKeywords: String,       // JSON list
+    val parameters: String,            // JSON schema
+    val steps: String,                 // JSON List<ActionStep>
     val riskLevel: String,
     val version: Int = 1,
     val usageCount: Int = 0,
@@ -440,19 +491,84 @@ data class SkillPackEntity(
 )
 ```
 
-### Device Lookup Priority
+### OS Class Tags
+
+Skills are grouped into **OS class tags** for efficient filtering and download:
+
+```
+OS Class Tags:
+  "android_10"        →  API 29 only
+  "android_11"        →  API 30 only
+  "android_12_13"     →  API 31–33 (Material You era)
+  "android_14_plus"   →  API 34+ (Predictive back era)
+  "universal"         →  Works on ALL versions (app-only logic, no system UI)
+
+Skin Tags (optional, layered on top):
+  "oneui"             →  Samsung OneUI-specific steps
+  "miui"              →  Xiaomi MIUI-specific steps
+  "coloros"           →  Oppo/Realme ColorOS-specific steps
+  "oxygenos"          →  OnePlus OxygenOS-specific steps
+  "stock"             →  Pixel / stock Android
+  null                →  Works on any skin
+```
+
+### OS-Aware Lookup Priority
 
 ```
 Goal: "send WhatsApp message"
-Device: Samsung SM-G991B, Android 14, WhatsApp 2.24.1.76
+Device: Samsung SM-G991B, Android 14 (API 34), OneUI 6.1, WhatsApp 2.24.1.76
 
 Lookup priority (highest to lowest):
-  1. Match: device=SM-G991B  + api=34 + appVersion=2.24.1.76  ← most specific
-  2. Match: device=SM-G991B  + api=34 + appVersion=null
-  3. Match: device=SM-G991B  + api=null + appVersion=null
-  4. Match: device=null      + api=34   + appVersion=null
-  5. Match: device=null      + api=null + appVersion=null      ← generic fallback
+  1. Match: api=34 + skin=OneUI + device=SM-G991B + appVer=2.24.1.76  ← most specific
+  2. Match: api=34 + skin=OneUI + device=SM-G991B + appVer=null
+  3. Match: api=34 + skin=OneUI + device=null     + appVer=null
+  4. Match: api=34 + skin=null  + device=null     + appVer=null
+  5. Match: osClass="android_14_plus" + skin=null                     ← OS class match
+  6. Match: osClass="universal" + skin=null                           ← generic fallback
+  7. No match → LLM plans from scratch
 ```
+
+### OS Fingerprint — Auto-Detected on Device
+
+```kotlin
+object OsFingerprint {
+    val apiLevel: Int = Build.VERSION.SDK_INT              // 34
+    val osVersion: String = Build.VERSION.RELEASE          // "14"
+    val deviceModel: String = Build.MODEL                  // "SM-G991B"
+    val manufacturer: String = Build.MANUFACTURER          // "samsung"
+    val brand: String = Build.BRAND                        // "samsung"
+
+    val osSkin: String = detectSkin()                      // "OneUI"
+    val skinVersion: String? = detectSkinVersion()         // "6.1"
+
+    val osClassTag: String = when (apiLevel) {
+        29       -> "android_10"
+        30       -> "android_11"
+        in 31..33 -> "android_12_13"
+        in 34..99 -> "android_14_plus"
+        else     -> "universal"
+    }
+
+    private fun detectSkin(): String = when {
+        manufacturer.equals("samsung", ignoreCase = true)  -> "oneui"
+        manufacturer.equals("xiaomi", ignoreCase = true)   -> "miui"
+        manufacturer.equals("oppo", ignoreCase = true)
+            || manufacturer.equals("realme", ignoreCase = true) -> "coloros"
+        manufacturer.equals("oneplus", ignoreCase = true)  -> "oxygenos"
+        manufacturer.equals("google", ignoreCase = true)   -> "stock"
+        else -> "stock"  // default to stock for unknown OEMs
+    }
+
+    private fun detectSkinVersion(): String? {
+        // Samsung: ro.build.version.oneui
+        // Xiaomi:  ro.miui.ui.version.name
+        return try {
+            val process = Runtime.getRuntime().exec("getprop ro.build.version.oneui")
+            val result = process.inputStream.bufferedReader().readLine()
+            if (!result.isNullOrBlank()) result else null
+        } catch (e: Exception) { null }
+    }
+}
 
 ---
 
@@ -712,9 +828,16 @@ data class SkillPackEntity(
     val steps: String,                // JSON: List<ActionStep>
     val riskLevel: String,            // LOW | MEDIUM | HIGH | CRITICAL
 
-    // Device scoping
+    // === OS Classification ===
+    val minApiLevel: Int = 29,        // minimum Android API supported
+    val maxApiLevel: Int? = null,     // null = supports all future versions
+    val targetApiLevel: Int,          // the OS this skill was tested on
+    val osClassTag: String,           // "android_12_13" | "android_14_plus" | "universal"
+    val osSkin: String? = null,       // "oneui" | "miui" | "stock" | null (any skin)
+    val skinVersion: String? = null,  // "6.1" | "15.0" | null
+
+    // === Device scoping ===
     val deviceModel: String? = null,
-    val androidApiLevel: Int? = null,
     val appVersion: String? = null,
 
     // Quality signals
@@ -827,6 +950,7 @@ data class SkillPackEntity(
 8. **Silent updates** — skill updates happen in background, never interrupt user
 9. **RAM first** — top 20 most-used skills preloaded into memory at startup
 10. **User rules override everything** — personal permission rules always take priority over global policy
+11. **OS-first downloads** — only download skills compatible with the user's Android version and OS skin; never waste bandwidth or storage on incompatible skills
 
 ---
 
@@ -1097,5 +1221,485 @@ if (blockedAppsDao.isBlocked(appPackage)) {
 
 ---
 
-*AURA Skill System v1.0 — Self-learning, self-healing, community-powered*
+## OS-Classified Skill Download System
+
+When a user installs AURA or connects to the cloud skill store, they should **only receive skills compatible with their OS** — not the entire global catalog.
+
+### The Problem
+
+```
+Global skill store has 5,000 skills:
+  1,200 → Android 10–11 specific
+  1,800 → Android 12–13 specific
+  1,500 → Android 14+ specific
+    500 → Universal (app-only, no system UI)
+
+User has Android 14 (API 34) on Samsung OneUI 6.1
+
+Without OS filtering:
+  Downloads ALL 5,000 skills → 3,000 are useless on their device
+  Wastes storage, bandwidth, and clutters Skill Store UI
+
+With OS filtering:
+  Downloads only:  1,500 (android_14_plus) + 500 (universal)
+  + bonus:         Skills with osSkin="oneui" get priority
+  Total: ~2,000 relevant skills — 60% less noise
+```
+
+---
+
+### Supabase Cloud Schema — OS-Aware
+
+```sql
+CREATE TABLE skill_packs (
+    skill_id          TEXT PRIMARY KEY,
+    app_package       TEXT NOT NULL,
+    intent_category   TEXT NOT NULL,
+    intent_action     TEXT NOT NULL,
+    display_name      TEXT NOT NULL,
+
+    -- OS Classification
+    min_api_level     INT NOT NULL DEFAULT 29,
+    max_api_level     INT,                          -- NULL = no upper limit
+    target_api_level  INT NOT NULL,
+    os_class_tag      TEXT NOT NULL DEFAULT 'universal',  -- android_12_13, android_14_plus, etc.
+    os_skin           TEXT,                          -- oneui, miui, stock, NULL = any
+    skin_version      TEXT,
+
+    -- Device scoping
+    device_model      TEXT,
+    app_version       TEXT,
+
+    -- Skill content
+    trigger_keywords  JSONB NOT NULL,
+    parameters        JSONB NOT NULL,
+    steps             JSONB NOT NULL,
+    risk_level        TEXT NOT NULL,
+
+    -- Quality
+    version           INT DEFAULT 1,
+    usage_count       INT DEFAULT 0,
+    success_rate      FLOAT DEFAULT 1.0,
+    downloads         INT DEFAULT 0,
+    is_verified       BOOLEAN DEFAULT false,
+
+    -- Metadata
+    created_by        TEXT,
+    tags              TEXT[],
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT unique_skill UNIQUE (app_package, intent_category, intent_action, os_class_tag, os_skin)
+);
+
+-- Index for OS-filtered queries (the most common query pattern)
+CREATE INDEX idx_skill_os_class ON skill_packs (os_class_tag, os_skin);
+CREATE INDEX idx_skill_api_range ON skill_packs (min_api_level, max_api_level);
+CREATE INDEX idx_skill_keywords  ON skill_packs USING GIN (trigger_keywords);
+```
+
+---
+
+### OS-Filtered Cloud Query
+
+```kotlin
+// Only fetch skills that work on THIS user's device
+suspend fun fetchCompatibleSkills(
+    osFingerprint: OsFingerprint
+): List<CloudSkill> {
+
+    return supabase.from("skill_packs")
+        .select() {
+            // Rule 1: API level must be in range
+            filter {
+                gte("min_api_level", 0)  // always true, starting point
+                lte("min_api_level", osFingerprint.apiLevel)
+                or {
+                    isNull("max_api_level")
+                    gte("max_api_level", osFingerprint.apiLevel)
+                }
+            }
+
+            // Rule 2: OS class tag must match OR be universal
+            filter {
+                or {
+                    eq("os_class_tag", osFingerprint.osClassTag)
+                    eq("os_class_tag", "universal")
+                }
+            }
+
+            // Rule 3: Skin must match OR be null (any skin)
+            filter {
+                or {
+                    eq("os_skin", osFingerprint.osSkin)
+                    isNull("os_skin")
+                }
+            }
+
+            order("usage_count", Order.DESCENDING)
+        }
+        .decodeList<CloudSkill>()
+}
+```
+
+---
+
+### OS-Aware SkillSyncer — Background Download
+
+```kotlin
+@Singleton
+class OsAwareSkillSyncer @Inject constructor(
+    private val localDao: SkillPackDao,
+    private val cloudApi: SupabaseSkillApi,
+    private val osFingerprint: OsFingerprint
+) {
+    // Called on first launch + periodically in background
+    suspend fun syncSkillsForMyOs() {
+
+        // Step 1: Get skills compatible with THIS device's OS
+        val compatibleSkills = cloudApi.fetchCompatibleSkills(osFingerprint)
+
+        // Step 2: Filter out skills we already have (or have newer versions of)
+        val localSkillIds = localDao.getAllSkillIds()
+        val newSkills = compatibleSkills.filter { cloud ->
+            val local = localDao.getSkill(cloud.skillId)
+            local == null || cloud.version > local.version
+        }
+
+        // Step 3: Download and cache locally
+        for (skill in newSkills) {
+            localDao.upsert(skill.toEntity())
+        }
+
+        Log.i("SkillSyncer",
+            "Synced ${newSkills.size} skills for " +
+            "${osFingerprint.osClassTag} / ${osFingerprint.osSkin}"
+        )
+    }
+
+    // Called when a locally learned skill is uploaded
+    suspend fun uploadWithOsTag(skill: SkillPackEntity) {
+        val taggedSkill = skill.copy(
+            targetApiLevel = osFingerprint.apiLevel,
+            osClassTag = osFingerprint.osClassTag,
+            osSkin = osFingerprint.osSkin,
+            skinVersion = osFingerprint.skinVersion,
+            minApiLevel = osFingerprint.apiLevel,   // conservative: tested on this OS only
+            maxApiLevel = null                       // assume forward-compatible until proven otherwise
+        )
+        cloudApi.uploadSkill(taggedSkill.toCloudModel())
+    }
+}
+```
+
+---
+
+### First-Launch OS Skill Bootstrap
+
+When AURA is installed for the first time, it runs an **OS-aware bootstrap** to pre-download the most popular skills for the user's exact OS:
+
+```kotlin
+class FirstLaunchBootstrap @Inject constructor(
+    private val syncer: OsAwareSkillSyncer,
+    private val osFingerprint: OsFingerprint,
+    private val preferences: SharedPreferences
+) {
+    suspend fun onFirstLaunch() {
+        if (preferences.getBoolean("bootstrap_done", false)) return
+
+        // Step 1: Detect OS
+        val os = osFingerprint
+        Log.i("Bootstrap",
+            "Device: ${os.deviceModel}, " +
+            "Android ${os.osVersion} (API ${os.apiLevel}), " +
+            "Skin: ${os.osSkin} ${os.skinVersion ?: ""}"
+        )
+
+        // Step 2: Download top skills for this OS
+        syncer.syncSkillsForMyOs()
+
+        // Step 3: Mark bootstrap complete
+        preferences.edit().putBoolean("bootstrap_done", true).apply()
+    }
+}
+```
+
+```
+First launch on Samsung Galaxy S24 (Android 14, OneUI 6.1):
+
+  ┌─────────────────────────────────────────────┐
+  │  🚀 Setting up AURA for your device...       │
+  │                                             │
+  │  📱 Android 14 · Samsung OneUI 6.1           │
+  │                                             │
+  │  Downloading compatible skills...            │
+  │  ████████████████░░░░░░  67%                │
+  │                                             │
+  │  ✅ WhatsApp Send Message (OneUI optimized)  │
+  │  ✅ Google Pay Send Money                    │
+  │  ✅ Zomato Reorder (Android 14+)             │
+  │  ⏳ Gmail Compose...                         │
+  │                                             │
+  │  Skipped 1,200 skills (not for Android 14)  │
+  └─────────────────────────────────────────────┘
+```
+
+---
+
+### OS-Aware Keyword Scoring — Updated
+
+The scoring system now includes an **OS match bonus**:
+
+```kotlin
+private fun scoreSkill(skill: SkillPackEntity, goal: String): Float {
+    var score = 0f
+    val goalLower = goal.lowercase()
+    val os = OsFingerprint
+
+    // Factor 1: Keyword match count (max 50 pts)
+    val keywords = skill.triggerKeywords.fromJson<List<String>>()
+    val matchCount = keywords.count { goalLower.contains(it) }
+    score += matchCount * 10f
+
+    // Factor 2: Exact phrase match bonus (20 pts)
+    if (keywords.any { goalLower == it }) score += 20f
+
+    // Factor 3: Success rate (max 50 pts)
+    score += skill.successRate * 50f
+
+    // Factor 4: Usage count popularity (max 20 pts)
+    score += minOf(skill.usageCount / 500f, 20f)
+
+    // Factor 5: Community verified badge (15 pts)
+    if (skill.isVerified) score += 15f
+
+    // Factor 6: Device-specific match bonus (10 pts)
+    if (skill.deviceModel == os.deviceModel) score += 10f
+
+    // Factor 7: App version match (5 pts)
+    if (skill.appVersion == getInstalledAppVersion(skill.appPackage)) score += 5f
+
+    // === NEW: OS match bonuses ===
+
+    // Factor 8: Exact OS class tag match (25 pts)
+    if (skill.osClassTag == os.osClassTag) score += 25f
+    // Universal skills get partial credit (10 pts)
+    else if (skill.osClassTag == "universal") score += 10f
+
+    // Factor 9: OS skin match (20 pts)
+    if (skill.osSkin == os.osSkin) score += 20f
+    // Null skin (works on any) gets partial credit (8 pts)
+    else if (skill.osSkin == null) score += 8f
+
+    // Factor 10: Exact API level match (10 pts)
+    if (skill.targetApiLevel == os.apiLevel) score += 10f
+
+    return score
+}
+```
+
+### Score Breakdown Example — OS-Aware
+
+```
+Goal: "send whatsapp message to Rahul"
+Device: Samsung SM-G991B, Android 14 (API 34), OneUI 6.1
+
+Skill A: "whatsapp_send_message" (universal, no skin, verified)
+  Keyword matches:  2  × 10 = 20 pts
+  Success rate:   0.94 × 50 = 47 pts
+  Usage count:   8,000 / 500 = 16 pts
+  Verified:              +15 pts
+  OS class:    universal  +10 pts (partial)
+  OS skin:     null       + 8 pts (partial)
+  ──────────────────────────────────
+  TOTAL SCORE:          116 pts
+
+Skill B: "whatsapp_send_message" (android_14_plus, OneUI, verified)
+  Keyword matches:  2  × 10 = 20 pts
+  Success rate:   0.96 × 50 = 48 pts
+  Usage count:   3,200 / 500 =  6 pts
+  Verified:              +15 pts
+  OS class: android_14_plus +25 pts  ← EXACT MATCH
+  OS skin:     oneui       +20 pts  ← EXACT MATCH
+  Target API:  34          +10 pts  ← EXACT MATCH
+  ──────────────────────────────────
+  TOTAL SCORE:          144 pts  ← WINNER (OS-optimized)
+```
+
+---
+
+### OS-Aware Skill Store UI
+
+```
+┌──────────────────────────────────────────────────┐
+│  🧩 AURA Skill Store                              │
+│                                                  │
+│  📱 Your Device: Android 14 · Samsung OneUI 6.1  │
+│  Showing skills compatible with your OS           │
+│                                                  │
+│  Filter: [All Apps ▼]  [My OS Only ✓]  [Sort ▼] │
+│                                                  │
+│  ─── Optimized for Your OS ──────────────────── │
+│                                                  │
+│  ┌──────────────────────────────────────────┐    │
+│  │ 📤 WhatsApp Send Message            ✅   │    │
+│  │ 🏷 android_14+ · oneui · messaging       │    │
+│  │ ⭐ 3,200 users · 96% success · v3        │    │
+│  │ 🎯 OPTIMIZED FOR YOUR DEVICE              │    │
+│  │                        [Downloaded ✓]    │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  ┌──────────────────────────────────────────┐    │
+│  │ 💳 Google Pay Send Money             ✅   │    │
+│  │ 🏷 android_14+ · universal · payment     │    │
+│  │ ⭐ 8,230 users · 91% success · v2        │    │
+│  │ 📱 Works on all Android 14+ devices       │    │
+│  │                        [Download ⬇]     │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  ─── Universal Skills ───────────────────────── │
+│                                                  │
+│  ┌──────────────────────────────────────────┐    │
+│  │ 🍕 Zomato Reorder Last Order              │    │
+│  │ 🏷 universal · food · zomato              │    │
+│  │ ⭐ 127 users · 89% success · v1           │    │
+│  │ 🌍 Works on all Android versions           │    │
+│  │                        [Download ⬇]     │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  ─── Not Compatible ─────────────────────────── │
+│  ⚠️ 1,200 skills hidden (Android 10–11 only)    │
+│  ⚠️   800 skills hidden (MIUI-specific)         │
+│     [Show incompatible skills anyway]            │
+└──────────────────────────────────────────────────┘
+```
+
+---
+
+### OS Migration — When Users Upgrade Android
+
+When a user upgrades their Android version (e.g. Android 13 → 14), AURA detects the change and:
+
+```kotlin
+class OsMigrationHandler @Inject constructor(
+    private val syncer: OsAwareSkillSyncer,
+    private val localDao: SkillPackDao,
+    private val preferences: SharedPreferences
+) {
+    suspend fun checkForOsMigration() {
+        val savedApiLevel = preferences.getInt("last_known_api", 0)
+        val currentApiLevel = OsFingerprint.apiLevel
+
+        if (savedApiLevel != 0 && currentApiLevel > savedApiLevel) {
+            // OS was upgraded!
+            Log.i("OsMigration",
+                "OS upgraded: API $savedApiLevel → $currentApiLevel")
+
+            // Step 1: Mark OS-specific old skills as potentially stale
+            val oldOsSkills = localDao.getSkillsByOsClass(
+                osClassTagForApi(savedApiLevel)
+            )
+            for (skill in oldOsSkills) {
+                if (skill.osClassTag != "universal") {
+                    localDao.markStale(skill.skillId)
+                }
+            }
+
+            // Step 2: Download new skills for the upgraded OS
+            syncer.syncSkillsForMyOs()
+
+            // Step 3: Notify user
+            notifyUser(
+                "AURA detected your Android upgrade! " +
+                "Downloading optimized skills for Android ${OsFingerprint.osVersion}..."
+            )
+        }
+
+        preferences.edit().putInt("last_known_api", currentApiLevel).apply()
+    }
+}
+```
+
+```
+User upgrades Samsung Galaxy from Android 13 → Android 14:
+
+  ┌─────────────────────────────────────────────┐
+  │  🔄 Android Upgrade Detected!                │
+  │                                             │
+  │  Android 13 (API 33) → Android 14 (API 34)  │
+  │                                             │
+  │  • Marked 42 old skills for re-validation   │
+  │  • Downloading 38 new Android 14+ skills    │
+  │  • 12 universal skills unchanged            │
+  │                                             │
+  │  Your skills will auto-repair as you use    │
+  │  them. No action needed!                    │
+  │                                             │
+  │                              [Got it ✓]     │
+  └─────────────────────────────────────────────┘
+```
+
+---
+
+### OS Classification — SkillLearner Integration
+
+When AURA auto-learns a new skill from a successful LLM task, it now **automatically tags it with the user's OS info**:
+
+```kotlin
+// In SkillLearner — after every successful LLM-planned task
+suspend fun learnFromSuccess(
+    goal: String,
+    executedSteps: List<ActionStep>,
+    appPackage: String
+) {
+    val os = OsFingerprint
+
+    val newSkill = SkillPackEntity(
+        skillId = generateSkillId(goal, appPackage),
+        appPackage = appPackage,
+        triggerKeywords = extractKeywords(goal).toJson(),
+        parameters = extractParameters(executedSteps).toJson(),
+        steps = executedSteps.toJson(),
+        riskLevel = inferRiskLevel(executedSteps),
+        createdBy = "local",
+
+        // OS classification — auto-tagged from device
+        targetApiLevel = os.apiLevel,
+        minApiLevel = os.apiLevel,           // conservative: only tested on this OS
+        maxApiLevel = null,                  // assume forward-compat until proven otherwise
+        osClassTag = os.osClassTag,
+        osSkin = os.osSkin,
+        skinVersion = os.skinVersion,
+
+        version = 1,
+        usageCount = 1,
+        successRate = 1.0f
+    )
+
+    // Save locally
+    localDao.upsert(newSkill)
+
+    // Upload to cloud WITH OS tags — other users with same OS benefit
+    cloudApi.uploadSkill(newSkill.toCloudModel())
+}
+```
+
+---
+
+### OS Classification Summary Table
+
+| Scenario | What Happens |
+|---|---|
+| **First install** | Detects OS fingerprint → downloads only compatible skills from Supabase |
+| **Skill learned locally** | Auto-tagged with device's OS class + skin → uploaded to cloud |
+| **Cloud skill search** | Filtered by `os_class_tag` + `os_skin` + API range → only compatible results |
+| **Skill scoring** | OS-exact match gets +25 pts class + 20 pts skin vs generic |
+| **OS upgrade detected** | Old OS-specific skills marked stale → new OS skills downloaded |
+| **Skill Store UI** | Shows "Optimized for your device" badge → hides incompatible skills |
+| **Skill merge** | Same intent + different OS → multi-strategy steps with OS-scoped fallbacks |
+| **Universal skills** | Tagged `osClassTag="universal"` → downloaded by ALL users, scored lower than OS-specific |
+
+---
+
+*AURA Skill System v1.1 — Self-learning, self-healing, community-powered, OS-classified*
 

@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">AURA</string>
+    <string name="accessibility_service_label">AURA Agent</string>
+    <string name="accessibility_description">AURA uses Accessibility Services to read and control your phone on your behalf. It only acts on your explicit commands and always asks for approval before sensitive actions like sending messages or making payments.</string>
+    <string name="notification_channel_name">AURA Agent</string>
+    <string name="notification_channel_desc">AURA is running and ready for your commands</string>
+    <string name="notification_title">AURA is active</string>
+    <string name="notification_text">Say \"Hey AURA\" or tap to give a command</string>
+    <string name="enable_accessibility">Enable Accessibility Service</string>
+    <string name="accessibility_enabled">✓ AURA Agent is active</string>
+    <string name="accessibility_disabled">⚠ Accessibility Service not enabled</string>
+    <string name="emergency_stop">⛔ STOP</string>
+    <string name="allow">Allow</string>
+    <string name="deny">Deny</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+    <string name="listening">Listening...</string>
+    <string name="type_command_hint">Type your command or tap the mic…</string>
+    <string name="task_log_empty">No tasks yet. Give AURA a command to get started.</string>
+    <string name="settings_groq_key_label">Groq API Key</string>
+    <string name="settings_gemini_key_label">Gemini API Key</string>
+    <string name="settings_voice_narration">Voice narration</string>
+    <string name="settings_voice_narration_desc">AURA speaks its actions aloud during execution</string>
+</resources>
