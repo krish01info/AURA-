@@ -1,4 +1,4 @@
-package com.aura.ui
+package com.aura.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
@@ -41,7 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -63,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.agent.RiskLevel
 import com.aura.agent.TaskState
 import com.aura.ui.theme.AuraCritical
 import com.aura.ui.theme.AuraPrimary
@@ -73,14 +73,6 @@ import com.aura.ui.viewmodel.HomeViewModel
 
 /**
  * HomeScreen — the main AURA interface.
- *
- * Features:
- * - Service status indicator (green/red dot)
- * - Text command input with send button
- * - Voice command button (mic)
- * - Task status display
- * - Confirmation dialog overlay for HIGH/CRITICAL actions
- * - Emergency Stop button (always visible during execution)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,7 +93,6 @@ fun HomeScreen(
                 TopAppBar(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // AURA logo / title
                             Text(
                                 text = "AURA",
                                 style = MaterialTheme.typography.headlineMedium,
@@ -117,7 +108,6 @@ fun HomeScreen(
                         }
                     },
                     actions = {
-                        // Service status dot
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
@@ -145,8 +135,6 @@ fun HomeScreen(
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-
-                // ── Accessibility warning ─────────────────────────────
                 AnimatedVisibility(visible = !isAccessibilityEnabled) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -186,13 +174,9 @@ fun HomeScreen(
                 }
 
                 Spacer(Modifier.height(24.dp))
-
-                // ── Animated orb / status indicator ──────────────────
                 AuraOrb(taskState = taskState)
-
                 Spacer(Modifier.height(16.dp))
 
-                // ── Status text ───────────────────────────────────────
                 Text(
                     text = taskState.statusText(),
                     style = MaterialTheme.typography.bodyLarge,
@@ -202,7 +186,6 @@ fun HomeScreen(
 
                 Spacer(Modifier.weight(1f))
 
-                // ── Command input ─────────────────────────────────────
                 OutlinedTextField(
                     value = commandText,
                     onValueChange = { commandText = it },
@@ -215,15 +198,9 @@ fun HomeScreen(
                     },
                     trailingIcon = {
                         Row {
-                            // Voice button
                             IconButton(onClick = { viewModel.startVoiceInput() }) {
-                                Icon(
-                                    Icons.Default.Mic,
-                                    contentDescription = "Voice input",
-                                    tint = AuraSecondary
-                                )
+                                Icon(Icons.Default.Mic, "Voice input", tint = AuraSecondary)
                             }
-                            // Send button
                             IconButton(
                                 onClick = {
                                     if (commandText.isNotBlank()) {
@@ -232,19 +209,13 @@ fun HomeScreen(
                                     }
                                 }
                             ) {
-                                Icon(
-                                    Icons.Default.Send,
-                                    contentDescription = "Send command",
-                                    tint = AuraPrimary
-                                )
+                                Icon(Icons.Default.Send, "Send command", tint = AuraPrimary)
                             }
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AuraPrimary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
                     ),
                     shape = RoundedCornerShape(16.dp)
                 )
@@ -253,28 +224,24 @@ fun HomeScreen(
             }
         }
 
-        // ── Emergency Stop button (always visible during execution) ──
         val isExecuting = taskState is TaskState.Executing || taskState is TaskState.WaitingForUser
         AnimatedVisibility(
             visible = isExecuting,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)
         ) {
             Button(
                 onClick = { viewModel.emergencyStop() },
                 colors = ButtonDefaults.buttonColors(containerColor = AuraCritical),
                 shape = RoundedCornerShape(50)
             ) {
-                Icon(Icons.Default.Stop, contentDescription = null)
+                Icon(Icons.Default.Stop, null)
                 Spacer(Modifier.width(8.dp))
                 Text("STOP", fontWeight = FontWeight.Bold)
             }
         }
 
-        // ── Confirmation dialog overlay ───────────────────────────────
         if (taskState is TaskState.WaitingForUser) {
             ConfirmationOverlay(
                 state = taskState as TaskState.WaitingForUser,
@@ -284,8 +251,6 @@ fun HomeScreen(
         }
     }
 }
-
-// ── Animated pulsing orb ─────────────────────────────────────────
 
 @Composable
 private fun AuraOrb(taskState: TaskState) {
@@ -310,22 +275,14 @@ private fun AuraOrb(taskState: TaskState) {
     }
 
     Box(
-        modifier = Modifier
-            .size(120.dp)
-            .scale(scale)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(orbColor, orbColor.copy(alpha = 0.3f))
-                )
-            ),
+        modifier = Modifier.size(120.dp).scale(scale).clip(CircleShape).background(
+            Brush.radialGradient(colors = listOf(orbColor, orbColor.copy(alpha = 0.3f)))
+        ),
         contentAlignment = Alignment.Center
     ) {
         Text("✦", fontSize = 48.sp, color = Color.White)
     }
 }
-
-// ── Status text ──────────────────────────────────────────────────
 
 private fun TaskState.statusText(): String = when (this) {
     is TaskState.Created -> "Ready. Give me a command."
@@ -338,26 +295,20 @@ private fun TaskState.statusText(): String = when (this) {
     is TaskState.Cancelled -> "Stopped."
 }
 
-// ── Confirmation overlay ─────────────────────────────────────────
-
 @Composable
 private fun ConfirmationOverlay(
     state: TaskState.WaitingForUser,
     onAllow: () -> Unit,
     onDeny: () -> Unit
 ) {
-    val riskColor = if (state.riskLevel == com.aura.agent.RiskLevel.CRITICAL) AuraCritical else AuraWarning
+    val riskColor = if (state.riskLevel == RiskLevel.CRITICAL) AuraCritical else AuraWarning
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
         contentAlignment = Alignment.Center
     ) {
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             shape = RoundedCornerShape(24.dp)
         ) {
@@ -366,7 +317,7 @@ private fun ConfirmationOverlay(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (state.riskLevel == com.aura.agent.RiskLevel.CRITICAL) "💳 CRITICAL ACTION" else "⚠️ CONFIRM ACTION",
+                    text = if (state.riskLevel == RiskLevel.CRITICAL) "💳 CRITICAL ACTION" else "⚠️ CONFIRM ACTION",
                     fontWeight = FontWeight.Bold,
                     color = riskColor,
                     fontSize = 18.sp
@@ -377,7 +328,7 @@ private fun ConfirmationOverlay(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                if (state.riskLevel == com.aura.agent.RiskLevel.CRITICAL) {
+                if (state.riskLevel == RiskLevel.CRITICAL) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "⚠️ This action cannot be undone",

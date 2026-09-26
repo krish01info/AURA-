@@ -1,13 +1,7 @@
 package com.aura.ui.viewmodel
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.text.TextUtils
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,8 +10,11 @@ import com.aura.agent.TaskManager
 import com.aura.agent.TaskState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,10 +37,21 @@ class HomeViewModel @Inject constructor(
         initialValue = TaskState.Created
     )
 
-    /** Checks if the AURA accessibility service is currently active. */
-    val isAccessibilityEnabled: StateFlow<kotlinx.coroutines.flow.Flow<Boolean>> get() = TODO()
-    // TODO: implement properly using AccessibilityManager check
-    // For now, use a simpler check in the UI
+    private val _isAccessibilityEnabled = MutableStateFlow(false)
+    val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
+
+    init {
+        pollAccessibilityStatus()
+    }
+
+    private fun pollAccessibilityStatus() {
+        viewModelScope.launch {
+            while (true) {
+                _isAccessibilityEnabled.value = isAccessibilityServiceEnabled()
+                delay(2000) // Poll every 2 seconds
+            }
+        }
+    }
 
     fun executeCommand(command: String) {
         if (command.isBlank()) return
@@ -75,24 +83,18 @@ class HomeViewModel @Inject constructor(
         taskManager.reset()
     }
 
-    /**
-     * Starts voice recognition using Android's built-in SpeechRecognizer.
-     * Free, on-device, no API key needed.
-     */
     fun startVoiceInput() {
         // TODO (Phase 4): Implement full VoiceManager with foreground service
-        // For Phase 0 skeleton, this is a placeholder
         Log.i(TAG, "Voice input requested — implement in Phase 4")
     }
 
     /** Check if AccessibilityService is running. */
-    fun isAccessibilityServiceEnabled(): Boolean {
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val expectedService = context.packageName + "/" + AURAAccessibilityService::class.java.name
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
-        return enabledServices.contains(
-            context.packageName + "/" + AURAAccessibilityService::class.java.name
-        )
+        return enabledServices.contains(expectedService)
     }
 }

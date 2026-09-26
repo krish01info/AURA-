@@ -1,10 +1,11 @@
 package com.aura.agent
 
 import android.app.Notification
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.aura.AURAApplication
@@ -18,9 +19,6 @@ import javax.inject.Inject
  *
  * Android kills background services aggressively. A foreground service with
  * a persistent notification is the correct way to keep the agent running.
- *
- * This service starts automatically after the user enables the agent
- * and restarts after device reboots via [BootReceiver].
  */
 @AndroidEntryPoint
 class AURAForegroundService : Service() {
@@ -32,8 +30,19 @@ class AURAForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
-        return START_STICKY  // Restart if killed by system
+        val notification = buildNotification()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -53,12 +62,13 @@ class AURAForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, AURAApplication.NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)  // TODO: replace with proper icon
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 }
