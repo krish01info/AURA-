@@ -5,6 +5,16 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ---
 
+## [v0.2.0] - 2026-09-30
+
+### Added
+- Complete OTA Updater (GitHub Releases)
+- Automated CI pipeline without keystore or secrets
+- Automatic check for updates on every app launch
+- Check Now button in Settings
+
+---
+
 ## [v0.1.0] - 2026-09-30
 
 ### Added
