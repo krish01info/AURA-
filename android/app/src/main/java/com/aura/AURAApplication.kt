@@ -24,7 +24,10 @@ class AURAApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        // Background check every 12 hrs (keeps running even when app is closed)
         UpdateCheckWorker.scheduleUpdateChecks(this)
+        // Immediate one-shot check on every launch so users see updates right away
+        UpdateCheckWorker.checkNow(this)
     }
 
     /**
