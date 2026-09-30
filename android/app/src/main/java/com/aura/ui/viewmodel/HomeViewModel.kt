@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.aura.accessibility.AURAAccessibilityService
 import com.aura.agent.TaskManager
 import com.aura.agent.TaskState
+import com.aura.data.model.ActionStep
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
@@ -22,8 +23,8 @@ import javax.inject.Inject
 private const val TAG = "HomeViewModel"
 
 /**
- * ViewModel for HomeScreen.
- * Bridges the UI with [TaskManager] and handles voice recognition.
+ * ViewModel for [HomeScreen].
+ * Bridges UI with [TaskManager] and handles voice recognition.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -48,27 +49,85 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             while (true) {
                 _isAccessibilityEnabled.value = isAccessibilityServiceEnabled()
-                delay(2000) // Poll every 2 seconds
+                delay(2000)
             }
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // Task execution
+    // ──────────────────────────────────────────────────────────────
+
+    /** Execute a natural language command — goes through Groq LLM planner. */
     fun executeCommand(command: String) {
         if (command.isBlank()) return
         Log.i(TAG, "Executing command: $command")
         taskManager.execute(command)
     }
 
-    fun emergencyStop() {
-        taskManager.emergencyStop()
+    /**
+     * Phase 1 hard-coded test: "Open WhatsApp"
+     *
+     * This bypasses the LLM entirely and runs a pre-built action plan directly.
+     * It proves the AccessibilityService, ActionExecutor, and TaskManager
+     * state machine all work end-to-end — before any API key is needed.
+     *
+     * Remove or gate behind a debug flag once Phase 2 is complete.
+     */
+    fun runWhatsAppTest() {
+        Log.i(TAG, "Phase 1 test: Open WhatsApp (direct steps, no LLM)")
+        val steps = listOf(
+            ActionStep(
+                action = ActionStep.OPEN_APP,
+                pkg = "com.whatsapp"
+            )
+        )
+        taskManager.executeDirectSteps(
+            label = "Test: Open WhatsApp",
+            steps = steps
+        )
     }
+
+    /**
+     * Phase 1 extended test: Full "Open WhatsApp → find Rahul → type → confirm send"
+     * Demonstrates the complete execution loop including the confirmation gate.
+     *
+     * Replace "Rahul" with an actual contact name on the test device.
+     */
+    fun runWhatsAppMessageTest(contact: String = "Rahul", message: String = "I am on my way!") {
+        Log.i(TAG, "Phase 1 test: WhatsApp message to $contact")
+        val steps = listOf(
+            ActionStep(action = ActionStep.OPEN_APP, pkg = "com.whatsapp"),
+            ActionStep(action = ActionStep.WAIT, waitMs = 2000L),
+            ActionStep(action = ActionStep.FIND_ELEMENT, text = contact),
+            ActionStep(action = ActionStep.TAP, text = contact),
+            ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
+            ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/entry"),
+            ActionStep(action = ActionStep.TYPE, inputText = message),
+            ActionStep(
+                action = ActionStep.CONFIRM_SEND,
+                message = "Send \"$message\" to $contact on WhatsApp?",
+                risk = "HIGH"
+            ),
+            ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send"),
+        )
+        taskManager.executeDirectSteps(
+            label = "Test: WhatsApp → $contact",
+            steps = steps
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Controls
+    // ──────────────────────────────────────────────────────────────
+
+    fun emergencyStop() = taskManager.emergencyStop()
+    fun reset() = taskManager.reset()
 
     fun approveAction() {
         val state = taskState.value
         if (state is TaskState.WaitingForUser) {
-            viewModelScope.launch {
-                state.onAllow()
-            }
+            viewModelScope.launch { state.onAllow() }
         }
     }
 
@@ -79,22 +138,21 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun reset() {
-        taskManager.reset()
-    }
-
+    /** Phase 4: integrate VoiceManager with foreground service for full wake-word + STT. */
     fun startVoiceInput() {
-        // TODO (Phase 4): Implement full VoiceManager with foreground service
         Log.i(TAG, "Voice input requested — implement in Phase 4")
     }
 
-    /** Check if AccessibilityService is running. */
+    // ──────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────
+
     private fun isAccessibilityServiceEnabled(): Boolean {
-        val expectedService = context.packageName + "/" + AURAAccessibilityService::class.java.name
-        val enabledServices = Settings.Secure.getString(
+        val expected = "${context.packageName}/${AURAAccessibilityService::class.java.name}"
+        val enabled = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
-        return enabledServices.contains(expectedService)
+        return enabled.contains(expected)
     }
 }

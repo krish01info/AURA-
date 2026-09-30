@@ -22,31 +22,38 @@ import javax.inject.Singleton
 private const val TAG = "TaskManager"
 
 /**
- * TaskManager — the orchestrator of the AURA agent.
+ * TaskManager — the central orchestrator of the AURA agent.
  *
  * Responsibilities:
- * - Accepts goals from UI (typed or voice)
- * - Triggers LLM planning (Groq)
- * - Runs the observe-plan-act execution loop
- * - Gates execution at HIGH/CRITICAL risk steps
- * - Handles emergency stop
- * - Persists task audit log to Room DB
+ *  - Accepts goals from the UI (typed or voice)
+ *  - Checks [SkillRouter] for a cached execution plan before calling the LLM
+ *  - Triggers LLM planning via [GroqClient] when no skill is cached
+ *  - Runs the observe-plan-act execution loop step by step
+ *  - Gates HIGH / CRITICAL risk steps — waits for user approval
+ *  - Handles emergency stop and soft pause
+ *  - Persists every task to the Room audit log via [TaskLogDao]
+ *
+ * State machine:
+ *   Created → Planning → Executing → [WaitingForUser →] Verifying → Completed
+ *   Any state → Cancelled  (emergency stop)
+ *   Any state → Failed      (error / user denied)
  */
 @Singleton
 class TaskManager @Inject constructor(
     private val groqClient: GroqClient,
     private val actionExecutor: ActionExecutor,
     private val policyEngine: PolicyEngine,
+    private val skillRouter: SkillRouter,
     private val taskLogDao: TaskLogDao
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentJob: Job? = null
 
-    /** Observable state — the UI reads this to render current status. */
+    /** Observable state — the UI collects this to render current status. */
     private val _state = MutableStateFlow<TaskState>(TaskState.Created)
     val state: StateFlow<TaskState> = _state.asStateFlow()
 
-    /** The current task's ID (used for audit logging). */
+    /** The current task's DB ID (used for audit logging). */
     private var currentTaskId: String? = null
 
     // ──────────────────────────────────────────────────────────────
@@ -54,23 +61,38 @@ class TaskManager @Inject constructor(
     // ──────────────────────────────────────────────────────────────
 
     /**
-     * Start executing a new goal.
+     * Start executing a natural-language goal.
+     * Checks [SkillRouter] for a cached plan first, then falls back to Groq LLM.
      * Cancels any currently running task first.
      */
     fun execute(goal: String) {
         stopCurrentTask()
-
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
+        currentJob = scope.launch { runTask(taskId, goal) }
+    }
 
-        currentJob = scope.launch {
-            runTask(taskId, goal)
-        }
+    /**
+     * Execute a pre-built list of [ActionStep]s directly — NO LLM call.
+     *
+     * Used for:
+     *  - Phase 1 hard-coded "Open WhatsApp" end-to-end test
+     *  - Future: skill cache replay
+     *  - Future: macro / recipe execution
+     *
+     * @param label  Human-readable name shown in the task log (e.g. "Test: Open WhatsApp")
+     * @param steps  The exact action sequence to run
+     */
+    fun executeDirectSteps(label: String, steps: List<ActionStep>) {
+        stopCurrentTask()
+        val taskId = UUID.randomUUID().toString()
+        currentTaskId = taskId
+        currentJob = scope.launch { runSteps(taskId, label, steps) }
     }
 
     /**
      * Emergency stop — halts all execution instantly.
-     * Called by the EmergencyStopButton or voice command "Hey AURA stop".
+     * Called by the EmergencyStopButton or future voice command "Hey AURA stop".
      */
     fun emergencyStop() {
         Log.w(TAG, "🛑 Emergency stop triggered!")
@@ -88,6 +110,21 @@ class TaskManager @Inject constructor(
         }
     }
 
+    /**
+     * Soft pause — suspend current execution without destroying the task.
+     * Called from [AURAAccessibilityService.onInterrupt] when the system
+     * temporarily interrupts the service (e.g. incoming call).
+     *
+     * Current implementation cancels like emergency stop, but is kept separate
+     * so Phase 4+ can implement true suspend/resume semantics.
+     */
+    fun pause() {
+        Log.w(TAG, "⏸ Task paused (system interrupt)")
+        stopCurrentTask()
+        // Keep the last state visible so the user can see what was interrupted.
+        // Do NOT transition to Cancelled — that is only for user-initiated stops.
+    }
+
     /** Reset state to Created (ready for next command). */
     fun reset() {
         _state.value = TaskState.Created
@@ -95,11 +132,10 @@ class TaskManager @Inject constructor(
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Internal execution loop
+    // LLM-backed task execution
     // ──────────────────────────────────────────────────────────────
 
     private suspend fun runTask(taskId: String, goal: String) {
-        // Log task start
         taskLogDao.insert(
             TaskLogEntity(
                 taskId = taskId,
@@ -110,67 +146,35 @@ class TaskManager @Inject constructor(
         )
 
         try {
-            // 1. PLANNING — ask Groq to generate action steps
             _state.value = TaskState.Planning
             Log.i(TAG, "Planning task [$taskId]: $goal")
 
-            val uiSnapshot = actionExecutor.getUiSnapshot()
-            val steps = groqClient.plan(goal, uiSnapshot)
+            // 1. Check skill cache first (Phase 2b will populate this)
+            val steps: List<ActionStep> = skillRouter.findSkill(goal)
+                ?: run {
+                    // 2. Fall back to Groq LLM
+                    val uiSnapshot = actionExecutor.getUiSnapshot()
+                    val llmSteps = groqClient.plan(goal, uiSnapshot)
+                    if (llmSteps.isNotEmpty()) {
+                        // Auto-save for future use
+                        scope.launch { skillRouter.learnSkill(goal, llmSteps) }
+                    }
+                    llmSteps
+                }
 
             if (steps.isEmpty()) {
-                fail(taskId, "LLM returned no action steps")
+                fail(taskId, "LLM returned no action steps for goal: $goal")
                 return
             }
 
-            // Handle clarification request from LLM
-            val clarifyStep = steps.firstOrNull { it.action == ActionStep.CLARIFY }
-            if (clarifyStep != null) {
-                // TODO (Phase 2): Surface clarification question to user via UI
-                fail(taskId, "Goal unclear: ${clarifyStep.clarification}")
+            val clarify = steps.firstOrNull { it.action == ActionStep.CLARIFY }
+            if (clarify != null) {
+                fail(taskId, "Goal unclear — ${clarify.clarification}")
                 return
             }
 
             Log.i(TAG, "Plan ready — ${steps.size} steps: ${steps.map { it.action }}")
-
-            // 2. EXECUTING — run steps one at a time
-            for ((index, step) in steps.withIndex()) {
-                // Check if cancelled
-                if (_state.value == TaskState.Cancelled) return
-
-                val risk = policyEngine.classify(step)
-
-                when (risk) {
-                    RiskLevel.LOW, RiskLevel.MEDIUM -> {
-                        // Auto-execute
-                        _state.value = TaskState.Executing(step, index, steps.size)
-                        actionExecutor.execute(step)
-                    }
-
-                    RiskLevel.HIGH, RiskLevel.CRITICAL -> {
-                        // Gate — wait for user approval
-                        val approved = suspendForApproval(step, risk)
-                        if (!approved) {
-                            fail(taskId, "User denied action: ${step.action}")
-                            return
-                        }
-                        _state.value = TaskState.Executing(step, index, steps.size)
-                        actionExecutor.execute(step)
-                    }
-                }
-            }
-
-            // 3. VERIFYING
-            _state.value = TaskState.Verifying
-
-            // 4. COMPLETED
-            _state.value = TaskState.Completed("Task completed: $goal")
-            taskLogDao.updateStatus(
-                taskId = taskId,
-                status = TaskStatus.COMPLETED,
-                finishedAt = System.currentTimeMillis(),
-                error = null
-            )
-            Log.i(TAG, "✅ Task [$taskId] completed")
+            runStepsInternal(taskId, steps)
 
         } catch (e: Exception) {
             Log.e(TAG, "Task [$taskId] failed: ${e.message}", e)
@@ -178,8 +182,72 @@ class TaskManager @Inject constructor(
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // Direct step execution (no LLM — Phase 1 test path)
+    // ──────────────────────────────────────────────────────────────
+
+    private suspend fun runSteps(taskId: String, label: String, steps: List<ActionStep>) {
+        taskLogDao.insert(
+            TaskLogEntity(
+                taskId = taskId,
+                goal = label,
+                status = TaskStatus.EXECUTING,
+                startedAt = System.currentTimeMillis()
+            )
+        )
+        try {
+            Log.i(TAG, "Direct execution [$taskId]: $label (${steps.size} steps)")
+            runStepsInternal(taskId, steps)
+        } catch (e: Exception) {
+            Log.e(TAG, "Direct task [$taskId] failed: ${e.message}", e)
+            fail(taskId, e.message ?: "Unknown error")
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Shared step execution loop
+    // ──────────────────────────────────────────────────────────────
+
+    private suspend fun runStepsInternal(taskId: String, steps: List<ActionStep>) {
+        for ((index, step) in steps.withIndex()) {
+            if (_state.value == TaskState.Cancelled) return
+
+            val risk = policyEngine.classify(step)
+
+            when (risk) {
+                RiskLevel.LOW, RiskLevel.MEDIUM -> {
+                    _state.value = TaskState.Executing(step, index, steps.size)
+                    actionExecutor.execute(step)
+                }
+                RiskLevel.HIGH, RiskLevel.CRITICAL -> {
+                    val approved = suspendForApproval(step, risk)
+                    if (!approved) {
+                        fail(taskId, "User denied action: ${step.action}")
+                        return
+                    }
+                    _state.value = TaskState.Executing(step, index, steps.size)
+                    actionExecutor.execute(step)
+                }
+            }
+        }
+
+        _state.value = TaskState.Verifying
+        _state.value = TaskState.Completed("Done!")
+        taskLogDao.updateStatus(
+            taskId = taskId,
+            status = TaskStatus.COMPLETED,
+            finishedAt = System.currentTimeMillis(),
+            error = null
+        )
+        Log.i(TAG, "✅ Task [$taskId] completed")
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Approval gate
+    // ──────────────────────────────────────────────────────────────
+
     /**
-     * Suspends execution and transitions to WaitingForUser state.
+     * Suspends execution and transitions to [TaskState.WaitingForUser].
      * Returns true if the user approved, false if denied.
      */
     private suspend fun suspendForApproval(step: ActionStep, risk: RiskLevel): Boolean {
@@ -199,12 +267,13 @@ class TaskManager @Inject constructor(
             }
         )
 
-        // Block the coroutine until user responds
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-            latch.await()
-        }
+        kotlinx.coroutines.withContext(Dispatchers.IO) { latch.await() }
         return result
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────
 
     private fun fail(taskId: String, reason: String) {
         _state.value = TaskState.Failed(reason)

@@ -221,6 +221,12 @@ fun HomeScreen(
                 )
 
                 Spacer(Modifier.height(16.dp))
+
+                // ── Phase 1 Test Panel ────────────────────────────────────
+                // Remove or gate behind BuildConfig.DEBUG once Phase 2 is done.
+                Phase1TestPanel(viewModel = viewModel)
+
+                Spacer(Modifier.height(16.dp))
             }
         }
 
@@ -354,6 +360,49 @@ private fun ConfirmationOverlay(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Phase 1 debug panel — hard-coded test buttons that bypass the LLM.
+ *
+ * These prove the AccessibilityService → ActionExecutor → TaskManager pipeline
+ * works before any API key is configured.
+ *
+ * Gate this behind [BuildConfig.DEBUG] or remove once Phase 2 is complete.
+ */
+@Composable
+private fun Phase1TestPanel(viewModel: HomeViewModel) {
+    androidx.compose.material3.HorizontalDivider(
+        modifier = androidx.compose.ui.Modifier.padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+    )
+    Text(
+        text = "Phase 1 Tests (no LLM)",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+        modifier = androidx.compose.ui.Modifier.padding(bottom = 4.dp)
+    )
+    Row(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Test 1 — just opens WhatsApp (no message, no confirmation gate)
+        androidx.compose.material3.OutlinedButton(
+            onClick = { viewModel.runWhatsAppTest() },
+            modifier = androidx.compose.ui.Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Open WhatsApp", style = MaterialTheme.typography.labelSmall)
+        }
+        // Test 2 — full flow: open → find contact → type → confirm → send
+        androidx.compose.material3.OutlinedButton(
+            onClick = { viewModel.runWhatsAppMessageTest() },
+            modifier = androidx.compose.ui.Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("WA → Rahul", style = MaterialTheme.typography.labelSmall)
         }
     }
 }

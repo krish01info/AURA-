@@ -37,7 +37,7 @@ class AURAAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        taskManager.emergencyStop()
+        taskManager.pause()
     }
 
     override fun onDestroy() {

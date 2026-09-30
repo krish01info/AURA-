@@ -23,3 +23,6 @@ google-services.json
 # ── OS cruft ─────────────────────────────────────────────────────────────────
 Thumbs.db
 desktop.ini
+
+# ── Kotlin compiler scratch files ─────────────────────────────────────────────
+.kotlin/

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths — used by UpdateManager to share the downloaded APK
+  with Android's package installer.
+
+  Grants read access to files in the public Downloads directory.
+-->
+<paths>
+    <external-files-path
+        name="downloads"
+        path="." />
+    <external-path
+        name="external_downloads"
+        path="Download/" />
+</paths>

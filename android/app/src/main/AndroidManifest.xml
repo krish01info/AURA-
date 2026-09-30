@@ -26,6 +26,17 @@
     <!-- Vibration for confirmations -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- ======================================= -->
+    <!--     OTA UPDATER PERMISSIONS             -->
+    <!-- ======================================= -->
+    <!-- Install APKs downloaded from GitHub -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Write APK to Downloads folder -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:name=".AURAApplication"
         android:allowBackup="false"
@@ -84,6 +95,20 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- ======================================= -->
+        <!--   FILE PROVIDER — OTA APK installer     -->
+        <!--  Shares downloaded APK with installer   -->
+        <!-- ======================================= -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
     </application>
 

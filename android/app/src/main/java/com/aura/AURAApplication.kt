@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.aura.update.UpdateCheckWorker
 import dagger.hilt.android.HiltAndroidApp
 
 /**
@@ -16,30 +17,45 @@ import dagger.hilt.android.HiltAndroidApp
 class AURAApplication : Application() {
 
     companion object {
-        const val NOTIFICATION_CHANNEL_ID = "aura_agent_channel"
+        const val NOTIFICATION_CHANNEL_ID     = "aura_agent_channel"
+        const val NOTIFICATION_CHANNEL_UPDATE = "aura_update_channel"
     }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
+        UpdateCheckWorker.scheduleUpdateChecks(this)
     }
 
     /**
-     * Creates the persistent notification channel for the AURA foreground service.
+     * Creates persistent notification channels.
      * Required for Android 8.0+ (API 26+).
      */
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val notificationManager = getSystemService(NotificationManager::class.java)
+
+            // Agent foreground service channel (silent)
+            val agentChannel = NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
                 getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_LOW  // Silent — no sound/vibration
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = getString(R.string.notification_channel_desc)
                 setShowBadge(false)
             }
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
+
+            // Update notification channel (high importance — user should see it)
+            val updateChannel = NotificationChannel(
+                NOTIFICATION_CHANNEL_UPDATE,
+                "AURA Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifies when a new AURA version is available on GitHub"
+                setShowBadge(true)
+            }
+
+            notificationManager.createNotificationChannels(listOf(agentChannel, updateChannel))
         }
     }
 }
