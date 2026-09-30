@@ -17,6 +17,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.2.0)'
+        required: true
+        default: 'v0.2.0'
 
 jobs:
   release:
@@ -49,14 +55,18 @@ jobs:
       - name: Rename APK
         run: |
           VERSION="${{ github.ref_name }}"
+          if [ "$VERSION" = "main" ] || [ -z "$VERSION" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              android/app/build/outputs/apk/debug/aura-${VERSION}.apk
           echo "APK=android/app/build/outputs/apk/debug/aura-${VERSION}.apk" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Get release notes from CHANGELOG
         id: notes
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ env.VERSION }}"
           NOTES=$(awk "/^## \[${TAG}\]/{found=1;next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
           if [ -z "$NOTES" ]; then NOTES="AURA ${TAG}"; fi
           echo "body<<EOF" >> $GITHUB_OUTPUT
@@ -66,7 +76,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "AURA ${{ github.ref_name }}"
+          name: "AURA ${{ env.VERSION }}"
+          tag_name: "${{ env.VERSION }}"
           body: ${{ steps.notes.outputs.body }}
           files: ${{ env.APK }}
         env:
