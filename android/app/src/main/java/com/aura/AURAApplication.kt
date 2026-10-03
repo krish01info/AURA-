@@ -4,8 +4,15 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.aura.skills.OsMigrationHandler
+import com.aura.skills.SkillCache
+import com.aura.skills.SkillSeeder
 import com.aura.update.UpdateCheckWorker
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * AURA Application class.
@@ -16,6 +23,10 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp
 class AURAApplication : Application() {
 
+    @Inject lateinit var skillSeeder: SkillSeeder
+    @Inject lateinit var skillCache: SkillCache
+    @Inject lateinit var osMigrationHandler: OsMigrationHandler
+
     companion object {
         const val NOTIFICATION_CHANNEL_ID     = "aura_agent_channel"
         const val NOTIFICATION_CHANNEL_UPDATE = "aura_update_channel"
@@ -24,10 +35,16 @@ class AURAApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
-        // Background check every 12 hrs (keeps running even when app is closed)
         UpdateCheckWorker.scheduleUpdateChecks(this)
-        // Immediate one-shot check on every launch so users see updates right away
         UpdateCheckWorker.checkNow(this)
+        CoroutineScope(Dispatchers.IO).launch {
+            // Seed initial skills (no-op if already seeded)
+            skillSeeder.seedIfEmpty()
+            // Warm L1 RAM cache with top-20 most-used skills
+            skillCache.warmUp()
+            // Detect Android OS upgrades and mark old skills stale
+            osMigrationHandler.checkForOsMigration()
+        }
     }
 
     /**

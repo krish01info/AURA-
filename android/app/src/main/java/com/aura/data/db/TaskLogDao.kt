@@ -37,4 +37,16 @@ interface TaskLogDao {
     /** Count of successful tasks. */
     @Query("SELECT COUNT(*) FROM task_log WHERE status = 'COMPLETED'")
     fun observeSuccessCount(): Flow<Int>
+
+    /** All tasks as a plain list for Dashboard stats. */
+    @Query("SELECT * FROM task_log ORDER BY startedAt DESC")
+    suspend fun getAllList(): List<TaskLogEntity>
+
+    /** All tasks as a Flow for Dashboard screen. */
+    @Query("SELECT * FROM task_log ORDER BY startedAt DESC")
+    fun getAll(): Flow<List<TaskLogEntity>>
+
+    /** Update status using TaskStatus enum name string. */
+    @Query("UPDATE task_log SET status = :status, finishedAt = :finishedAt, errorMessage = :error WHERE taskId = :taskId")
+    suspend fun updateStatus(taskId: String, status: com.aura.data.model.TaskStatus, finishedAt: Long, error: String?)
 }

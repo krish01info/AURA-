@@ -64,6 +64,7 @@ import com.aura.ui.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onNavigateToPermissions: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val groqKey by viewModel.groqKey.collectAsState()
@@ -157,6 +158,39 @@ fun SettingsScreen(
                 checked = voiceNarration,
                 onCheckedChange = { viewModel.setVoiceNarration(it) }
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ── Security / Permissions ────────────────────────────────────
+            SectionHeader("Security")
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "App Permissions",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        "Control exactly what AURA can do per app and action. Block apps, set always-allow rules, or force confirmation dialogs.",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        fontSize = 12.sp
+                    )
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onNavigateToPermissions,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🔐  Manage App Permissions")
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

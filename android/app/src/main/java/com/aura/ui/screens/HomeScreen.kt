@@ -10,6 +10,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,8 +27,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -41,6 +47,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,6 +69,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.agent.RiskLevel
 import com.aura.agent.TaskState
@@ -73,17 +82,25 @@ import com.aura.ui.viewmodel.HomeViewModel
 
 /**
  * HomeScreen — the main AURA interface.
+ *
+ * Phase 3: ConfirmationOverlay + BiometricGate for HIGH/CRITICAL actions
+ * Phase 4: Voice toggle, listening indicator, WakeWord bubble toggle
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onNavigateToLog: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToSkillStore: () -> Unit = {},
+    onNavigateToDashboard: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val taskState by viewModel.taskState.collectAsState()
     val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsState()
+    val isListening by viewModel.isListening.collectAsState()
+    val isSpeaking by viewModel.isSpeaking.collectAsState()
+    val isVoiceEnabled by viewModel.isVoiceEnabled.collectAsState()
     var commandText by remember { mutableStateOf("") }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -108,6 +125,7 @@ fun HomeScreen(
                         }
                     },
                     actions = {
+                        // Accessibility status dot
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
@@ -115,6 +133,12 @@ fun HomeScreen(
                                 .background(if (isAccessibilityEnabled) AuraSuccess else AuraCritical)
                         )
                         Spacer(Modifier.width(8.dp))
+                        IconButton(onClick = onNavigateToDashboard) {
+                            Icon(Icons.Default.BarChart, "Dashboard", tint = AuraPrimary)
+                        }
+                        IconButton(onClick = onNavigateToSkillStore) {
+                            Icon(Icons.Default.Extension, "Skill Store", tint = AuraSecondary)
+                        }
                         IconButton(onClick = onNavigateToLog) {
                             Icon(Icons.Default.History, "Task log", tint = MaterialTheme.colorScheme.onSurface)
                         }
@@ -135,50 +159,93 @@ fun HomeScreen(
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // ── Accessibility warning ─────────────────────────────
                 AnimatedVisibility(visible = !isAccessibilityEnabled) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = AuraWarning.copy(alpha = 0.15f)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Column {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = AuraWarning.copy(alpha = 0.15f)),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("⚠️", fontSize = 20.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    "Accessibility Service disabled",
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = AuraWarning
-                                )
-                                Text(
-                                    "AURA needs this to control your phone",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                            Spacer(Modifier.weight(1f))
-                            Button(
-                                onClick = {
-                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = AuraWarning)
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Enable", fontSize = 12.sp)
+                                Text("⚠️", fontSize = 20.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "Accessibility Service disabled",
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AuraWarning
+                                    )
+                                    Text(
+                                        "AURA needs this to control your phone",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
+                                Spacer(Modifier.weight(1f))
+                                Button(
+                                    onClick = {
+                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AuraWarning)
+                                ) {
+                                    Text("Enable", fontSize = 12.sp)
+                                }
                             }
                         }
+                        Spacer(Modifier.height(12.dp))
                     }
-                    Spacer(Modifier.height(12.dp))
                 }
 
-                Spacer(Modifier.height(24.dp))
-                AuraOrb(taskState = taskState)
+                // ── Overlay permission hint ───────────────────────────
+                AnimatedVisibility(visible = !viewModel.canShowOverlay) {
+                    Column {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = AuraSecondary.copy(alpha = 0.1f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("💬", fontSize = 18.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Grant overlay permission for floating mic bubble",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(
+                                    onClick = { viewModel.requestOverlayPermission() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AuraSecondary),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                ) {
+                                    Text("Grant", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+
                 Spacer(Modifier.height(16.dp))
 
+                // ── Main Orb ─────────────────────────────────────────
+                AuraOrb(taskState = taskState, isListening = isListening)
+                Spacer(Modifier.height(16.dp))
+
+                // ── Status text ──────────────────────────────────────
                 Text(
-                    text = taskState.statusText(),
+                    text = if (isListening) "🎤 Listening…"
+                    else if (isSpeaking) "🔊 Speaking…"
+                    else taskState.statusText(),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                     textAlign = TextAlign.Center
@@ -186,6 +253,51 @@ fun HomeScreen(
 
                 Spacer(Modifier.weight(1f))
 
+                // ── Voice Mode Toggle (Phase 4) ───────────────────────
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isVoiceEnabled)
+                            AuraPrimary.copy(alpha = 0.12f)
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isVoiceEnabled) Icons.Default.RecordVoiceOver else Icons.Default.MicOff,
+                            contentDescription = null,
+                            tint = if (isVoiceEnabled) AuraPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Wake Word Mode",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Say \"Hey AURA\" to activate",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
+                        Switch(
+                            checked = isVoiceEnabled,
+                            onCheckedChange = { viewModel.setVoiceEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = AuraPrimary)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // ── Command Input ────────────────────────────────────
                 OutlinedTextField(
                     value = commandText,
                     onValueChange = { commandText = it },
@@ -199,7 +311,11 @@ fun HomeScreen(
                     trailingIcon = {
                         Row {
                             IconButton(onClick = { viewModel.startVoiceInput() }) {
-                                Icon(Icons.Default.Mic, "Voice input", tint = AuraSecondary)
+                                Icon(
+                                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                                    contentDescription = "Voice input",
+                                    tint = if (isListening) AuraWarning else AuraSecondary
+                                )
                             }
                             IconButton(
                                 onClick = {
@@ -222,20 +338,22 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                // ── Phase 1 Test Panel ────────────────────────────────────
-                // Remove or gate behind BuildConfig.DEBUG once Phase 2 is done.
+                // ── Phase 1 Test Panel (debug) ────────────────────────
                 Phase1TestPanel(viewModel = viewModel)
 
                 Spacer(Modifier.height(16.dp))
             }
         }
 
-        val isExecuting = taskState is TaskState.Executing || taskState is TaskState.WaitingForUser
+        // ── Floating Emergency STOP button ──────────────────────────
+        val showStop = taskState is TaskState.Executing || taskState is TaskState.Planning
         AnimatedVisibility(
-            visible = isExecuting,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)
+            visible = showStop,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp)
         ) {
             Button(
                 onClick = { viewModel.emergencyStop() },
@@ -248,57 +366,84 @@ fun HomeScreen(
             }
         }
 
+        // ── Confirmation / Biometric overlay ─────────────────────────
         if (taskState is TaskState.WaitingForUser) {
             ConfirmationOverlay(
                 state = taskState as TaskState.WaitingForUser,
-                onAllow = { viewModel.approveAction() },
+                onAllow = {
+                    val activity = context as? FragmentActivity
+                    if (activity != null) {
+                        viewModel.approveWithBiometric(activity)
+                    } else {
+                        viewModel.approveAction()
+                    }
+                },
                 onDeny = { viewModel.denyAction() }
             )
         }
     }
 }
 
+// ──────────────────────────────────────────────────────────────
+// Composables
+// ──────────────────────────────────────────────────────────────
+
 @Composable
-private fun AuraOrb(taskState: TaskState) {
+private fun AuraOrb(taskState: TaskState, isListening: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "orb")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (taskState is TaskState.Executing || taskState is TaskState.Planning) 1.15f else 1.02f,
+        targetValue = when {
+            isListening -> 1.25f
+            taskState is TaskState.Executing || taskState is TaskState.Planning -> 1.15f
+            else -> 1.02f
+        },
         animationSpec = infiniteRepeatable(
-            animation = tween(1000),
+            animation = tween(if (isListening) 600 else 1000),
             repeatMode = RepeatMode.Reverse
         ),
         label = "orb_scale"
     )
 
-    val orbColor = when (taskState) {
-        is TaskState.Executing -> AuraPrimary
-        is TaskState.Planning -> AuraSecondary
-        is TaskState.Completed -> AuraSuccess
-        is TaskState.Failed -> AuraCritical
-        is TaskState.WaitingForUser -> AuraWarning
-        else -> AuraPrimary.copy(alpha = 0.5f)
+    val orbColor = when {
+        isListening -> AuraSecondary
+        else -> when (taskState) {
+            is TaskState.Executing   -> AuraPrimary
+            is TaskState.Planning    -> AuraSecondary
+            is TaskState.Completed   -> AuraSuccess
+            is TaskState.Failed      -> AuraCritical
+            is TaskState.WaitingForUser -> AuraWarning
+            else -> AuraPrimary.copy(alpha = 0.5f)
+        }
     }
 
     Box(
-        modifier = Modifier.size(120.dp).scale(scale).clip(CircleShape).background(
-            Brush.radialGradient(colors = listOf(orbColor, orbColor.copy(alpha = 0.3f)))
-        ),
+        modifier = Modifier
+            .size(120.dp)
+            .scale(scale)
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(colors = listOf(orbColor, orbColor.copy(alpha = 0.3f)))
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Text("✦", fontSize = 48.sp, color = Color.White)
+        Text(
+            text = if (isListening) "🎤" else "✦",
+            fontSize = 48.sp,
+            color = Color.White
+        )
     }
 }
 
 private fun TaskState.statusText(): String = when (this) {
-    is TaskState.Created -> "Ready. Give me a command."
-    is TaskState.Planning -> "Thinking…"
-    is TaskState.Executing -> "Step ${stepIndex + 1} of $totalSteps: ${currentStep.action}"
+    is TaskState.Created        -> "Ready. Give me a command."
+    is TaskState.Planning       -> "Thinking…"
+    is TaskState.Executing      -> "Step ${stepIndex + 1} of $totalSteps: ${currentStep.action}"
     is TaskState.WaitingForUser -> "Waiting for your approval"
-    is TaskState.Verifying -> "Verifying…"
-    is TaskState.Completed -> "✓ $summary"
-    is TaskState.Failed -> "Failed: $reason"
-    is TaskState.Cancelled -> "Stopped."
+    is TaskState.Verifying      -> "Verifying…"
+    is TaskState.Completed      -> "✓ $summary"
+    is TaskState.Failed         -> "Failed: $reason"
+    is TaskState.Cancelled      -> "Stopped."
 }
 
 @Composable
@@ -307,40 +452,77 @@ private fun ConfirmationOverlay(
     onAllow: () -> Unit,
     onDeny: () -> Unit
 ) {
-    val riskColor = if (state.riskLevel == RiskLevel.CRITICAL) AuraCritical else AuraWarning
+    val isCritical = state.riskLevel == RiskLevel.CRITICAL
+    val riskColor = if (isCritical) AuraCritical else AuraWarning
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.75f)),
         contentAlignment = Alignment.Center
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
             shape = RoundedCornerShape(24.dp)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (state.riskLevel == RiskLevel.CRITICAL) "💳 CRITICAL ACTION" else "⚠️ CONFIRM ACTION",
+                    text = if (isCritical) "💳 CRITICAL ACTION" else "⚠️ CONFIRM ACTION",
                     fontWeight = FontWeight.Bold,
                     color = riskColor,
                     fontSize = 18.sp
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Risk Level: ${state.riskLevel.name}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = riskColor.copy(alpha = 0.7f)
+                )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = state.riskAction.message ?: "Allow this action: ${state.riskAction.action}?",
+                    text = state.riskAction.message
+                        ?: "Allow this action: ${state.riskAction.action}?",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                if (state.riskLevel == RiskLevel.CRITICAL) {
+                if (isCritical) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "⚠️ This action cannot be undone",
                         color = AuraCritical,
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "🔐 Biometric authentication required",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                // Anomaly warning banner
+                if (state.anomalyWarning != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = AuraCritical.copy(alpha = 0.15f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = state.anomalyWarning,
+                            color = AuraCritical,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -353,10 +535,12 @@ private fun ConfirmationOverlay(
                     }
                     Button(
                         onClick = onAllow,
-                        colors = ButtonDefaults.buttonColors(containerColor = AuraSuccess),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCritical) AuraWarning else AuraSuccess
+                        ),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("✓ Allow")
+                        Text(if (isCritical) "🔐 Authenticate" else "✓ Allow")
                     }
                 }
             }
@@ -366,40 +550,33 @@ private fun ConfirmationOverlay(
 
 /**
  * Phase 1 debug panel — hard-coded test buttons that bypass the LLM.
- *
- * These prove the AccessibilityService → ActionExecutor → TaskManager pipeline
- * works before any API key is configured.
- *
- * Gate this behind [BuildConfig.DEBUG] or remove once Phase 2 is complete.
  */
 @Composable
 private fun Phase1TestPanel(viewModel: HomeViewModel) {
     androidx.compose.material3.HorizontalDivider(
-        modifier = androidx.compose.ui.Modifier.padding(vertical = 4.dp),
+        modifier = Modifier.padding(vertical = 4.dp),
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
     )
     Text(
         text = "Phase 1 Tests (no LLM)",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-        modifier = androidx.compose.ui.Modifier.padding(bottom = 4.dp)
+        modifier = Modifier.padding(bottom = 4.dp)
     )
     Row(
-        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Test 1 — just opens WhatsApp (no message, no confirmation gate)
         androidx.compose.material3.OutlinedButton(
             onClick = { viewModel.runWhatsAppTest() },
-            modifier = androidx.compose.ui.Modifier.weight(1f),
+            modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp)
         ) {
             Text("Open WhatsApp", style = MaterialTheme.typography.labelSmall)
         }
-        // Test 2 — full flow: open → find contact → type → confirm → send
         androidx.compose.material3.OutlinedButton(
             onClick = { viewModel.runWhatsAppMessageTest() },
-            modifier = androidx.compose.ui.Modifier.weight(1f),
+            modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp)
         ) {
             Text("WA → Rahul", style = MaterialTheme.typography.labelSmall)

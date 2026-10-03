@@ -97,12 +97,17 @@ OUTPUT FORMAT (strict JSON array):
     suspend fun plan(
         goal: String,
         uiContext: String,
-        activeModel: String? = null
+        activeModel: String? = null,
+        memoryContext: String = ""
     ): List<ActionStep> {
         val userContent = buildString {
+            if (memoryContext.isNotBlank()) {
+                append(memoryContext)
+                append("\n\n")
+            }
             append("Goal: $goal\n\n")
             append("[UI_CONTENT_START]\n")
-            append(uiContext.take(3000)) // cap to avoid token overflow
+            append(uiContext.take(3000))
             append("\n[UI_CONTENT_END]")
         }
 

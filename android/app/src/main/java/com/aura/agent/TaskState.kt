@@ -33,7 +33,9 @@ sealed class TaskState {
         val riskAction: ActionStep,
         val riskLevel: RiskLevel,
         val onAllow: suspend () -> Unit,
-        val onDeny: () -> Unit
+        val onDeny: () -> Unit,
+        /** Non-null when AnomalyDetector flagged something suspicious. */
+        val anomalyWarning: String? = null
     ) : TaskState()
 
     /** All steps executed — agent is verifying the outcome. */

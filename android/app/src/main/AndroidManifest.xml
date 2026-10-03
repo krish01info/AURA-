@@ -87,6 +87,12 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Wake word listener — runs in background for "Hey AURA" -->
+        <service
+            android:name=".voice.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Boot receiver — restart agent after reboot -->
         <receiver
             android:name=".agent.BootReceiver"
