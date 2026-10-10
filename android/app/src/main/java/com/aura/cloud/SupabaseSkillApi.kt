@@ -5,7 +5,6 @@ import com.aura.data.model.SkillPackEntity
 import com.aura.di.SupabaseModule
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -125,10 +124,6 @@ class SupabaseSkillApi @Inject constructor(
     suspend fun searchSkills(keywords: List<String>): List<SkillPackEntity>? {
         if (!SupabaseModule.isConfigured) return null
         return try {
-            // Build a LIKE filter for each keyword joined by OR
-            val filter = keywords.joinToString(",") { kw ->
-                "trigger_keywords.ilike.%$kw%"
-            }
             val results = supabase.postgrest[TABLE]
                 .select {
                     filter {
@@ -235,6 +230,8 @@ class SupabaseSkillApi @Inject constructor(
     ): List<SkillPackEntity> {
         if (!SupabaseModule.isConfigured) return emptyList()
         return try {
+            val from = (page * 20).toLong()
+            val to = ((page + 1) * 20 - 1).toLong()
             val results = supabase.postgrest[TABLE]
                 .select {
                     filter {
@@ -246,14 +243,13 @@ class SupabaseSkillApi @Inject constructor(
                         if (osSkin != null) {
                             or {
                                 eq("os_skin", osSkin)
-                                isNull("os_skin")
+                                exact("os_skin", null)
                             }
                         }
                     }
                     order("downloads", Order.DESCENDING)
                     order("success_rate", Order.DESCENDING)
-                    limit(20)
-                    offset((page * 20).toLong())
+                    range(from, to)
                 }
                 .decodeList<CloudSkill>()
             Log.d(TAG, "getTopSkills(os=$osClassTag, skin=$osSkin, page=$page) → ${results.size}")
