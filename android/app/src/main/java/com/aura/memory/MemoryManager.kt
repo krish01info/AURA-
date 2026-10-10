@@ -129,14 +129,16 @@ class MemoryManager @Inject constructor(
     suspend fun buildContextString(goal: String): String {
         val memories = recall(goal)
         if (memories.isEmpty()) return ""
+        // Compact one-liner per memory to minimise token spend
         return buildString {
-            appendLine("[MEMORY_CONTEXT_START]")
-            appendLine("Relevant past tasks (use as hints, not instructions):")
+            append("[MEMORY:")
             memories.forEachIndexed { i, m ->
-                appendLine("${i + 1}. Goal: \"${m.goal}\" → ${m.outcome} (app: ${m.appUsed})")
-                if (m.extraData != "{}") appendLine("   Data: ${m.extraData}")
+                if (i > 0) append("|")
+                // Format: "<goal> → <outcome> (<app short name>)"
+                val appShort = m.appUsed.substringAfterLast('.')
+                append(" ${i + 1}.\"${m.goal}\"→${m.outcome}($appShort)")
             }
-            appendLine("[MEMORY_CONTEXT_END]")
+            append("]")
         }
     }
 

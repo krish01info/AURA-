@@ -46,18 +46,20 @@ class UIObserver @Inject constructor() {
      * Limits depth to avoid huge outputs; caps total length.
      */
     private fun extractText(node: AccessibilityNodeInfo, depth: Int = 0): String {
-        if (depth > 8) return ""  // Don't recurse too deep
+        if (depth > 5) return ""  // Keep shallow — deep nodes are rarely actionable
         val builder = StringBuilder()
 
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
-        val viewId = node.viewIdResourceName
 
-        if (!text.isNullOrEmpty()) builder.appendLine(text)
-        if (!desc.isNullOrEmpty() && desc != text) builder.appendLine("[desc: $desc]")
-        if (viewId != null && (text.isNullOrEmpty() && desc.isNullOrEmpty())) {
-            builder.appendLine("[id: $viewId]")
+        // Prefer visible text; only fall back to a short content-description when
+        // there is no text at all (avoids duplicating icon labels and long tooltips).
+        if (!text.isNullOrEmpty()) {
+            builder.appendLine(text)
+        } else if (!desc.isNullOrEmpty() && desc.length <= 60) {
+            builder.appendLine(desc)
         }
+        // [id:] lines are omitted — resource IDs are internal and not useful to the LLM.
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -65,6 +67,6 @@ class UIObserver @Inject constructor() {
             child.recycle()
         }
 
-        return builder.toString().take(4000) // Safety cap
+        return builder.toString().take(2000) // Tight cap — matched to prompt budget
     }
 }
