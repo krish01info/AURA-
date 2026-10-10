@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.aura.cloud.SupabaseAuthManager
 import com.aura.skills.OsMigrationHandler
 import com.aura.skills.SkillCache
 import com.aura.skills.SkillSeeder
@@ -26,6 +27,7 @@ class AURAApplication : Application() {
     @Inject lateinit var skillSeeder: SkillSeeder
     @Inject lateinit var skillCache: SkillCache
     @Inject lateinit var osMigrationHandler: OsMigrationHandler
+    @Inject lateinit var supabaseAuthManager: SupabaseAuthManager
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID     = "aura_agent_channel"
@@ -38,6 +40,8 @@ class AURAApplication : Application() {
         UpdateCheckWorker.scheduleUpdateChecks(this)
         UpdateCheckWorker.checkNow(this)
         CoroutineScope(Dispatchers.IO).launch {
+            // Establish Supabase session (anonymous) before any cloud calls
+            supabaseAuthManager.ensureSession()
             // Seed initial skills (no-op if already seeded)
             skillSeeder.seedIfEmpty()
             // Warm L1 RAM cache with top-20 most-used skills

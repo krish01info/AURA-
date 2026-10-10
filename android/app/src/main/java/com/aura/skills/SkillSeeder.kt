@@ -61,7 +61,7 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.FIND_ELEMENT, text = "{contact_name}"),
                     ActionStep(action = ActionStep.TAP, text = "{contact_name}"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 1000L),
-                    ActionStep(action = ActionStep.FIND_ELEMENT, hint = "Message…"),
+                    ActionStep(action = ActionStep.FIND_ELEMENT, text = "Message…"),
                     ActionStep(action = ActionStep.TYPE, inputText = "{message_text}"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Send \"{message_text}\" to {contact_name}?", risk = "HIGH"),
@@ -100,7 +100,7 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.FIND_ELEMENT, text = "{contact_name}"),
                     ActionStep(action = ActionStep.TAP, text = "{contact_name}"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 1000L),
-                    ActionStep(action = ActionStep.FIND_ELEMENT, hint = "Enter amount"),
+                    ActionStep(action = ActionStep.FIND_ELEMENT, text = "Enter amount"),
                     ActionStep(action = ActionStep.TYPE, inputText = "{amount}"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Send ₹{amount} to {contact_name} via Google Pay?",
@@ -181,10 +181,10 @@ class SkillSeeder @Inject constructor(
                 steps = json.encodeToString(listOf(
                     ActionStep(action = ActionStep.OPEN_APP, pkg = "com.google.android.youtube"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
-                    ActionStep(action = ActionStep.FIND_ELEMENT, hint = "Search"),
-                    ActionStep(action = ActionStep.TAP, hint = "Search"),
+                    ActionStep(action = ActionStep.FIND_ELEMENT, text = "Search"),
+                    ActionStep(action = ActionStep.TAP, text = "Search"),
                     ActionStep(action = ActionStep.TYPE, inputText = "{search_query}"),
-                    ActionStep(action = ActionStep.TAP, hint = "Search")
+                    ActionStep(action = ActionStep.TAP, text = "Search")
                 )),
                 riskLevel = "LOW",
                 minApiLevel = API_ANY, maxApiLevel = null, targetApiLevel = API_ANY,
@@ -209,8 +209,8 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.OPEN_APP,
                         pkg = "com.google.android.apps.maps"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
-                    ActionStep(action = ActionStep.FIND_ELEMENT, hint = "Search here"),
-                    ActionStep(action = ActionStep.TAP, hint = "Search here"),
+                    ActionStep(action = ActionStep.FIND_ELEMENT, text = "Search here"),
+                    ActionStep(action = ActionStep.TAP, text = "Search here"),
                     ActionStep(action = ActionStep.TYPE, inputText = "{destination}"),
                     ActionStep(action = ActionStep.FIND_ELEMENT, text = "Directions"),
                     ActionStep(action = ActionStep.TAP, text = "Directions")

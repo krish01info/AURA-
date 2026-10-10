@@ -45,8 +45,4 @@ interface TaskLogDao {
     /** All tasks as a Flow for Dashboard screen. */
     @Query("SELECT * FROM task_log ORDER BY startedAt DESC")
     fun getAll(): Flow<List<TaskLogEntity>>
-
-    /** Update status using TaskStatus enum name string. */
-    @Query("UPDATE task_log SET status = :status, finishedAt = :finishedAt, errorMessage = :error WHERE taskId = :taskId")
-    suspend fun updateStatus(taskId: String, status: com.aura.data.model.TaskStatus, finishedAt: Long, error: String?)
 }

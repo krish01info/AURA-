@@ -8,6 +8,7 @@ import com.aura.data.db.SkillPackDao
 import com.aura.data.model.SkillPackEntity
 import com.aura.skills.OsFingerprint
 import com.aura.skills.SkillCache
+import com.aura.skills.SkillDiskCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,9 +18,10 @@ private const val TAG = "SkillRouter"
 /**
  * SkillRouter — 3-layer skill lookup with OS-aware scoring.
  *
- * Lookup chain (L1 → L2 → null):
- *   L1: RAM hot cache (SkillCache) — <1ms, top-20 most-used
- *   L2: Room DB                    — 5–15ms
+ * Lookup chain (L1 → L2 → L3 → null):
+ *   L1: RAM hot cache (SkillCache)   — <1 ms  — top-20 most-used in RAM
+ *   L2: Disk cache (SkillDiskCache)  — 1–5 ms — JSON files, keyword-indexed
+ *   L3: Room DB (SkillPackDao)       — 5–15ms  — all skills ever learned
  *   null → caller falls back to LLM planning
  *
  * When multiple skills match, the scoring system picks the winner.
@@ -40,6 +42,7 @@ private const val TAG = "SkillRouter"
 class SkillRouter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val skillCache: SkillCache,
+    private val diskCache: SkillDiskCache,
     private val localDao: SkillPackDao,
     private val osFingerprint: OsFingerprint
 ) {
@@ -50,34 +53,49 @@ class SkillRouter @Inject constructor(
     suspend fun findBestSkill(goal: String): SkillPackEntity? {
         val keywords = extractKeywords(goal)
 
-        // ── L1: RAM cache — instant ──────────────────────────────────
+        // ── L1: RAM cache — instant (<1 ms) ─────────────────────────
         val l1Candidates = skillCache.getAll(keywords)
         if (l1Candidates.isNotEmpty()) {
             val best = l1Candidates.maxByOrNull { scoreSkill(it, goal) }
             if (best != null) {
                 skillCache.recordHit(best.skillId)
-                Log.d(TAG, "L1 cache hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
+                skillCache.flushEvictions()          // persist any LRU evictions to disk
+                Log.d(TAG, "L1 hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
                 return best
             }
         }
 
-        // ── L2: Room DB ──────────────────────────────────────────────
-        val l2Candidates = mutableListOf<SkillPackEntity>()
-        for (keyword in keywords) {
-            l2Candidates += localDao.findByKeyword(keyword)
-        }
-
+        // ── L2: Disk cache — JSON files (1–5 ms) ────────────────────
+        val l2Candidates = diskCache.findByKeywords(keywords)
         if (l2Candidates.isNotEmpty()) {
             val best = l2Candidates.maxByOrNull { scoreSkill(it, goal) }
             if (best != null) {
-                skillCache.promote(best) // next time it's instant from RAM
-                Log.d(TAG, "L2 DB hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
+                skillCache.promote(best)             // pull into L1 RAM for next access
+                skillCache.flushEvictions()
+                Log.d(TAG, "L2 disk hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
                 return best
             }
         }
 
-        Log.d(TAG, "No skill found for: $goal")
-        return null  // LLM takes over
+        // ── L3: Room DB — source of truth (5–15 ms) ─────────────────
+        val l3Candidates = mutableListOf<SkillPackEntity>()
+        for (keyword in keywords) {
+            l3Candidates += localDao.findByKeyword(keyword)
+        }
+
+        if (l3Candidates.isNotEmpty()) {
+            val best = l3Candidates.maxByOrNull { scoreSkill(it, goal) }
+            if (best != null) {
+                diskCache.put(best)                  // write to L2 — next access won't hit Room
+                skillCache.promote(best)             // pull into L1 RAM
+                skillCache.flushEvictions()
+                Log.d(TAG, "L3 DB hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
+                return best
+            }
+        }
+
+        Log.d(TAG, "No skill found for: $goal → LLM will plan")
+        return null
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.aura.skills
 
 import android.util.Log
+import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
 import com.aura.data.model.ActionStep
 import com.aura.data.model.SkillPackEntity
@@ -12,23 +13,22 @@ import javax.inject.Singleton
 private const val TAG = "SkillRepository"
 
 /**
- * SkillRepository — 3-layer skill lookup with OS-aware scoring.
+ * SkillRepository — aggregates candidates across all cache layers for SkillRouter.
  *
  * Lookup chain (SKILL-SYSTEM.md §3-Layer Cache):
- *   L1: SkillCache RAM (< 1ms)  — top-20 most-used skills, LRU eviction
- *   L2: Room DB    (5–15ms)     — all locally cached/learned skills
- *   L3: null                    — falls through to Groq LLM in TaskManager
+ *   L1: SkillCache RAM (<1 ms)   — top-20 most-used, LRU eviction
+ *   L2: SkillDiskCache (1–5 ms)  — JSON files on internal storage, keyword-indexed
+ *   L3: Room DB (5–15 ms)        — source of truth for all locally-learned skills
+ *   L4: Supabase cloud (stub)    — community skills (Phase 6b)
  *
- * Note: L3 Supabase cloud lookup is a stub — wired in Phase 6b when
- * Supabase credentials are configured.
- *
- * Selection: SkillRouter handles the full OS-aware multi-factor scoring.
- * SkillRepository's job is to aggregate candidates for SkillRouter.
+ * SkillRouter handles OS-aware multi-factor scoring across the returned candidates.
  */
 @Singleton
 class SkillRepository @Inject constructor(
     private val localDao: SkillPackDao,
-    private val skillCache: SkillCache
+    private val skillCache: SkillCache,
+    private val diskCache: SkillDiskCache,
+    private val cloudApi: SupabaseSkillApi
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -50,7 +50,19 @@ class SkillRepository @Inject constructor(
             }
         }
 
-        // ── L2: Room DB ───────────────────────────────────────────
+        // ── L2: Disk cache ────────────────────────────────────────
+        val l2Hits = diskCache.findByKeywords(keywords)
+        if (l2Hits.isNotEmpty()) {
+            val best = l2Hits.maxByOrNull { it.successRate * minOf(it.usageCount / 100f, 1f) + it.successRate }
+            if (best != null) {
+                skillCache.promote(best)
+                skillCache.flushEvictions()
+                Log.d(TAG, "L2 disk hit: ${best.skillId}")
+                return best
+            }
+        }
+
+        // ── L3: Room DB ───────────────────────────────────────────
         val candidates = mutableListOf<SkillPackEntity>()
         for (keyword in keywords) {
             candidates.addAll(localDao.findByKeyword(keyword))
@@ -62,35 +74,45 @@ class SkillRepository @Inject constructor(
                 .maxByOrNull { it.successRate * minOf(it.usageCount.toFloat(), 1000f) }
 
             if (best != null) {
-                skillCache.promote(best)   // next time it's L1 instant
-                Log.d(TAG, "L2 DB hit: ${best.skillId}")
+                diskCache.put(best)            // write to L2 disk for next time
+                skillCache.promote(best)       // pull into L1 RAM
+                skillCache.flushEvictions()
+                Log.d(TAG, "L3 DB hit: ${best.skillId}")
                 return best
             }
         }
 
-        // ── L3: Supabase (stub — Phase 6b) ────────────────────────
-        // val cloudHit = supabaseApi.searchSkill(keywords)?.toEntity()
-        // if (cloudHit != null) {
-        //     localDao.upsert(cloudHit)
-        //     skillCache.promote(cloudHit)
-        //     return cloudHit
-        // }
+        // ── L4: Supabase cloud ─────────────────────────────────────────
+        val cloudHits = cloudApi.searchSkills(keywords)
+        if (!cloudHits.isNullOrEmpty()) {
+            val best = cloudHits.maxByOrNull { it.successRate }
+            if (best != null) {
+                localDao.upsert(best)          // persist to Room
+                diskCache.put(best)            // write to L2 disk
+                skillCache.promote(best)       // pull into L1 RAM
+                skillCache.flushEvictions()
+                Log.d(TAG, "L4 cloud hit: ${best.skillId}")
+                return best
+            }
+        }
 
         Log.d(TAG, "No skill found for: \"$goal\" → LLM will plan")
         return null
     }
 
     /**
-     * Find all skills that match any of the given keywords.
-     * Used by SkillRouter for multi-candidate scoring.
+     * Find all skills matching any of the given keywords across all cache layers.
+     * Used by SkillRouter for multi-candidate OS-aware scoring.
      */
     suspend fun findAllMatching(keywords: List<String>): List<SkillPackEntity> {
         val results = mutableListOf<SkillPackEntity>()
-        // L1 first
-        results.addAll(skillCache.getAll(keywords))
-        // L2 supplement
+        // L1 RAM
+        results += skillCache.getAll(keywords)
+        // L2 Disk
+        results += diskCache.findByKeywords(keywords)
+        // L3 Room DB
         for (keyword in keywords) {
-            results.addAll(localDao.findByKeyword(keyword))
+            results += localDao.findByKeyword(keyword)
         }
         return results.distinctBy { it.skillId }
     }

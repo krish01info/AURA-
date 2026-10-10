@@ -62,7 +62,7 @@ class DashboardViewModel @Inject constructor(
     private fun loadStats() {
         viewModelScope.launch {
             val allTasks = taskLogDao.getAllList()
-            val completed = allTasks.count { it.status.name == "COMPLETED" }
+            val completed = allTasks.count { it.status == "COMPLETED" }
             val total = allTasks.size
             val successRate = if (total > 0) (completed * 100 / total) else 0
             // Estimate 2min per task saved vs doing it manually

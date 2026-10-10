@@ -1,6 +1,7 @@
 package com.aura.skills
 
 import android.util.Log
+import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
 import com.aura.data.model.ActionStep
 import com.aura.data.model.SkillPackEntity
@@ -26,7 +27,8 @@ private const val TAG = "SkillLearner"
 @Singleton
 class SkillLearner @Inject constructor(
     private val skillPackDao: SkillPackDao,
-    private val osFingerprint: OsFingerprint
+    private val osFingerprint: OsFingerprint,
+    private val cloudApi: SupabaseSkillApi
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -86,6 +88,14 @@ class SkillLearner @Inject constructor(
 
             skillPackDao.upsert(skill)
             Log.i(TAG, "✅ Learned new skill: $canonicalId [$intentCategory/$intentAction] (${keywords.size} keywords)")
+
+            // Upload to Supabase community store (fire-and-forget)
+            // Local save is already done above — cloud failure is non-fatal
+            val uploaded = cloudApi.uploadSkill(skill)
+            if (uploaded) {
+                skillPackDao.markSynced(canonicalId)
+                Log.i(TAG, "☁️ Uploaded skill to cloud: $canonicalId")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to learn skill: ${e.message}", e)
         }

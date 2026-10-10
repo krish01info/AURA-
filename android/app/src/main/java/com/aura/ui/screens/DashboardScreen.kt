@@ -201,7 +201,7 @@ fun DashboardScreen(
                 items(recentTasks.take(8)) { task ->
                     RecentTaskRow(
                         goal = task.goal,
-                        status = task.status.name,
+                        status = task.status,
                         timestamp = task.startedAt
                     )
                 }

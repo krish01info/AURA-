@@ -1,6 +1,7 @@
 package com.aura.skills
 
 import android.util.Log
+import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
 import com.aura.data.model.ActionStep
 import javax.inject.Inject
@@ -25,7 +26,8 @@ private const val TAG = "SkillUpdater"
 class SkillUpdater @Inject constructor(
     private val localDao: SkillPackDao,
     private val skillHealthMonitor: SkillHealthMonitor,
-    private val skillLearner: SkillLearner
+    private val skillLearner: SkillLearner,
+    private val cloudApi: SupabaseSkillApi
 ) {
 
     /**
@@ -87,16 +89,15 @@ class SkillUpdater @Inject constructor(
         Log.i(TAG, "🔧 Repaired skill: $skillId → v$newVersion")
     }
 
-    // ── Cloud update check (Phase 6b stub) ───────────────────────
+    // ── Cloud update check ────────────────────────────────────────
     private suspend fun checkForCloudUpdate(skillId: String) {
-        // TODO Phase 6b: val cloudSkill = supabaseApi.getLatestVersion(skillId)
-        // if (cloudSkill != null) {
-        //     val local = localDao.getSkill(skillId)
-        //     if (local != null && cloudSkill.version > local.version) {
-        //         localDao.upsert(cloudSkill.toEntity())
-        //         Log.i(TAG, "Silent update: $skillId v${local.version} → v${cloudSkill.version}")
-        //     }
-        // }
-        Log.d(TAG, "Cloud check stub — Supabase not yet configured")
+        val local = localDao.getSkill(skillId) ?: return
+        val cloudSkill = cloudApi.getLatestVersion(skillId, local.version)
+        if (cloudSkill != null) {
+            localDao.upsert(cloudSkill)
+            Log.i(TAG, "Silent update: $skillId v${local.version} → v${cloudSkill.version}")
+        } else {
+            Log.d(TAG, "No cloud update for $skillId (already at latest)")
+        }
     }
 }

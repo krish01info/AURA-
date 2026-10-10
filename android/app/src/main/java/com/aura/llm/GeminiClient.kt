@@ -2,13 +2,10 @@ package com.aura.llm
 
 import android.util.Log
 import com.aura.data.model.ActionStep
-import com.aura.data.model.ChatMessage
-import com.aura.data.model.ChatRequest
-import com.aura.data.model.ChatResponse
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import retrofit2.Retrofit
 import retrofit2.http.Body
 import retrofit2.http.Header
@@ -50,9 +47,7 @@ class GeminiClient @Inject constructor() {
     private val retrofit = Retrofit.Builder()
         .baseUrl(GEMINI_BASE_URL)
         .addConverterFactory(
-            com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory(
-                "application/json".toMediaType()
-            )
+            json.asConverterFactory("application/json".toMediaType())
         )
         .build()
 
@@ -136,35 +131,33 @@ class GeminiClient @Inject constructor() {
 
 // ── Gemini API models ─────────────────────────────────────────
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiRequest(
     val contents: List<GeminiContent>,
     val generationConfig: GeminiGenerationConfig
 )
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiContent(
     val parts: List<GeminiPart>,
     val role: String = "user"
 )
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiPart(val text: String)
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiGenerationConfig(
     val temperature: Float = 0.1f,
     val maxOutputTokens: Int = 1024
 )
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiResponse(
     val candidates: List<GeminiCandidate> = emptyList()
 )
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GeminiCandidate(
     val content: GeminiContent
 )
-
-private fun String.toMediaType() = okhttp3.MediaType.parse(this)!!

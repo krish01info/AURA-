@@ -1,4 +1,4 @@
-﻿# AURA — AI Coding Context (AGENTS.md)
+# AURA — AI Coding Context (AGENTS.md)
 
 > **Read this file first.** It gives you the full picture of the codebase so you
 > don't need to read every source file before making changes.
@@ -27,10 +27,11 @@
 com.aura/
 ├── accessibility/      UI tree reading + event handling
 ├── agent/              Core agent loop (plan → execute → verify)
+├── cloud/              Supabase cloud layer (skills, auth, telemetry)
 ├── data/
 │   ├── db/             Room DAOs + AURADatabase
 │   └── model/          All data classes / entities
-├── di/                 Hilt modules (DB, Network)
+├── di/                 Hilt modules (DB, Network, Supabase)
 ├── llm/                LLM API clients (Groq, Gemini)
 ├── macros/             Macro recording & replay
 ├── memory/             Long-term semantic memory (embed + recall)
@@ -229,3 +230,35 @@ GroqClient uses shared Retrofit. GeminiClient builds its own (different base URL
 | `SKILL-SYSTEM.md` | 66 KB | Design doc |
 | `deep-research-report.md` | 46 KB | Research doc |
 | `implementation-plan.md` | 41 KB | Planning doc |
+
+---
+
+## 11. Future Work (Deferred � Do When Ready)
+
+### Supabase Realtime � Live Skill Push Notifications
+
+**What it does:**
+Instead of polling every few hours, Supabase pushes a WebSocket notification the instant a community skill changes (new version, verified, marked stale). Every phone gets the update silently within seconds.
+
+**Why deferred:**
+- `UpdateCheckWorker` + `SkillUpdater.checkForCloudUpdate()` already cover the use case via periodic polling.
+- A persistent WebSocket costs battery � not worth it until there are many active users.
+- Free tier supports 200 concurrent connections (sufficient for early launch).
+
+**How to implement:** Create `cloud/SupabaseRealtimeManager.kt`, subscribe to `skill_packs` UPDATE events via `supabase.realtime.channel()`, silently upsert newer versions into Room + promote to cache. Call `subscribeToSkillUpdates()` from `AURAApplication.onCreate()` after `ensureSession()`.
+
+---
+
+### Memory Sync + pgvector
+
+**What it does:**
+Replace the in-memory cosine loop in `MemoryManager.recall()` with a Postgres `pgvector` nearest-neighbor query. Scales to millions of memories and enables cross-device memory sync.
+
+**Why deferred:** `pgvector` extension requires the Supabase Pro plan.
+
+**SQL when upgrading:**
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+ALTER TABLE memory ADD COLUMN IF NOT EXISTS embedding vector(384);
+CREATE INDEX ON memory USING ivfflat (embedding vector_cosine_ops);
+```

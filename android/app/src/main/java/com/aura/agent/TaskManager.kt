@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -180,18 +182,17 @@ class TaskManager @Inject constructor(
 
             // 1. Check skill cache first (L1 RAM → L2 Room via SkillRouter)
             val cachedSkill = skillRouter.findBestSkill(goal)
-            val steps: List<ActionStep> = if (cachedSkill != null) {
-                // Deserialize cached skill steps
-                val parsed = try {
-                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            val cachedSteps = cachedSkill?.let { skill ->
+                try {
+                    Json { ignoreUnknownKeys = true }
                         .decodeFromString(
-                            kotlinx.serialization.builtins.ListSerializer(ActionStep.serializer()),
-                            cachedSkill.steps
+                            ListSerializer(ActionStep.serializer()),
+                            skill.steps
                         )
                 } catch (_: Exception) { emptyList() }
-                if (parsed.isNotEmpty()) parsed else null
-            } else null
-                ?: run {
+            }?.takeIf { it.isNotEmpty() }
+
+            val steps: List<ActionStep> = cachedSteps ?: run {
                     // 2. Recall memory context for richer LLM prompt
                     val memoryContext = memoryManager.buildContextString(goal)
 
