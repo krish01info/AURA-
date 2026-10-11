@@ -33,8 +33,8 @@ private const val TAG = "VoiceManager"
  *  2. Speech recognition — converts user speech to text
  *  3. Voice confirmation — "Say 'confirm' or 'cancel'" for HIGH risk actions
  *
- * Wake word detection is handled separately by [WakeWordService].
- * Offline STT fallback is handled by [VoskEngine].
+ * Wake word detection and the assistant flow live in [WakeWordService].
+ * Must be called on the main thread (SpeechRecognizer requirement).
  *
  * TTS is initialised eagerly on first injection so it is ready instantly.
  */
@@ -156,8 +156,7 @@ class VoiceManager @Inject constructor(
      * Start one-shot speech recognition and return the transcribed text.
      * Returns null if recognition fails or is cancelled.
      *
-     * Uses Android SpeechRecognizer (online). Falls back to [VoskEngine]
-     * when the device is offline (handled by [HomeViewModel]).
+     * Uses Android SpeechRecognizer. Call from the main thread.
      */
     suspend fun recognizeSpeech(): String? = suspendCancellableCoroutine { cont ->
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -166,7 +165,13 @@ class VoiceManager @Inject constructor(
             return@suspendCancellableCoroutine
         }
 
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        val recognizer = try {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Couldn't create SpeechRecognizer: ${e.message}")
+            cont.resume(null)
+            return@suspendCancellableCoroutine
+        }
         _isListening.value = true
 
         recognizer.setRecognitionListener(object : RecognitionListener {
@@ -201,9 +206,10 @@ class VoiceManager @Inject constructor(
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
         recognizer.startListening(intent)
 

@@ -13,13 +13,15 @@ data class ChatRequest(
     val messages: List<ChatMessage>,
     val temperature: Float = 0.1f,
     @SerialName("max_tokens") val maxTokens: Int = 2048,
-    @SerialName("response_format") val responseFormat: ResponseFormat? = null
+    @SerialName("response_format") val responseFormat: ResponseFormat? = null,
+    /** "low" | "medium" | "high" — only for reasoning models (gpt-oss). Omitted when null. */
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null
 )
 
 @Serializable
 data class ChatMessage(
     val role: String,    // "system" | "user" | "assistant"
-    val content: String
+    val content: String? = null  // nullable: reasoning models can reply with no content
 )
 
 @Serializable
@@ -29,8 +31,8 @@ data class ResponseFormat(
 
 @Serializable
 data class ChatResponse(
-    val id: String,
-    val model: String,
+    val id: String = "",
+    val model: String = "",
     val choices: List<Choice>,
     val usage: Usage? = null
 )

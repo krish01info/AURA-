@@ -5,7 +5,10 @@ import com.aura.data.db.TaskLogDao
 import com.aura.data.model.ActionStep
 import com.aura.data.model.TaskLogEntity
 import com.aura.data.model.TaskStatus
+import com.aura.llm.ApiKeyStore
+import com.aura.llm.GeminiClient
 import com.aura.llm.GroqClient
+import com.aura.llm.LlmException
 import com.aura.memory.MemoryManager
 import com.aura.policy.AppPermissionManager
 import com.aura.policy.AnomalyDetector
@@ -16,7 +19,10 @@ import com.aura.policy.PolicyEngine
 import com.aura.policy.PromptInjectionDefender
 import com.aura.policy.ValidationResult
 import com.aura.skills.SkillLearner
+import com.aura.skills.SkillUpdater
 import com.aura.voice.VoiceManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,12 +43,14 @@ private const val TAG = "TaskManager"
  * TaskManager — the central orchestrator of the AURA agent.
  *
  * Responsibilities:
- *  - Accepts goals from the UI (typed or voice)
- *  - Checks [SkillRouter] for a cached execution plan before calling the LLM
- *  - Triggers LLM planning via [GroqClient] when no skill is cached
- *  - Runs the observe-plan-act execution loop step by step
+ *  - Accepts goals (typed, voice, assistant popup, macros)
+ *  - Checks [SkillRouter] for a stored plan before calling an LLM
+ *  - Plans with [GroqClient]; falls back to [GeminiClient] if Groq fails or has no key
+ *  - Runs steps one by one and STOPS at the first failed step, with a spoken reason
  *  - Gates HIGH / CRITICAL risk steps — waits for user approval
- *  - Handles emergency stop and soft pause
+ *  - Saves a new skill only after its plan ran successfully
+ *  - Reports stored-skill outcomes to [SkillUpdater]; a failing stored skill is
+ *    re-planned once with the LLM (self-healing)
  *  - Persists every task to the Room audit log via [TaskLogDao]
  *
  * State machine:
@@ -53,10 +61,13 @@ private const val TAG = "TaskManager"
 @Singleton
 class TaskManager @Inject constructor(
     private val groqClient: GroqClient,
+    private val geminiClient: GeminiClient,
+    private val apiKeyStore: ApiKeyStore,
     private val actionExecutor: ActionExecutor,
     private val policyEngine: PolicyEngine,
     private val skillRouter: SkillRouter,
     private val skillLearner: SkillLearner,
+    private val skillUpdater: SkillUpdater,
     private val taskLogDao: TaskLogDao,
     private val auditLogger: AuditLogger,
     private val voiceManager: VoiceManager,
@@ -67,22 +78,36 @@ class TaskManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentJob: Job? = null
+    private val json = Json { ignoreUnknownKeys = true }
 
-    /** Observable state — the UI collects this to render current status. */
+    /** Observable state — the UI and the assistant popup collect this. */
     private val _state = MutableStateFlow<TaskState>(TaskState.Created)
     val state: StateFlow<TaskState> = _state.asStateFlow()
 
     /** The current task's DB ID (used for audit logging). */
     private var currentTaskId: String? = null
 
+    /** True while a task is planning, running or waiting for approval. */
+    val isBusy: Boolean
+        get() = when (_state.value) {
+            is TaskState.Planning, is TaskState.Executing,
+            is TaskState.WaitingForUser, is TaskState.Verifying -> true
+            else -> false
+        }
+
+    /** Outcome of running a list of steps. */
+    private sealed class RunOutcome {
+        data object Success : RunOutcome()
+        data class StepFailed(val reason: String) : RunOutcome()
+        data object Stopped : RunOutcome() // denied, cancelled or already failed
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Public API
     // ──────────────────────────────────────────────────────────────
 
     /**
-     * Start executing a natural-language goal.
-     * Checks [SkillRouter] for a cached plan first, then falls back to Groq LLM.
-     * Cancels any currently running task first.
+     * Start executing a natural-language goal. Cancels any running task first.
      */
     fun execute(goal: String) {
         val sanitized = injectionDefender.sanitize(goal)
@@ -94,6 +119,15 @@ class TaskManager @Inject constructor(
             }
             ValidationResult.Safe -> { /* continue */ }
         }
+
+        // Fail fast with a clear reason instead of a vague error later.
+        setupProblem()?.let { problem ->
+            _state.value = TaskState.Failed(problem)
+            voiceManager.speak(problem)
+            Log.w(TAG, "Not starting task: $problem")
+            return
+        }
+
         stopCurrentTask()
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
@@ -102,26 +136,22 @@ class TaskManager @Inject constructor(
 
     /**
      * Execute a pre-built list of [ActionStep]s directly — NO LLM call.
-     *
-     * Used for:
-     *  - Phase 1 hard-coded "Open WhatsApp" end-to-end test
-     *  - Future: skill cache replay
-     *  - Future: macro / recipe execution
-     *
-     * @param label  Human-readable name shown in the task log (e.g. "Test: Open WhatsApp")
-     * @param steps  The exact action sequence to run
+     * Used for the built-in test buttons and macro replay.
      */
     fun executeDirectSteps(label: String, steps: List<ActionStep>) {
+        if (!actionExecutor.isBound) {
+            val problem = ACCESSIBILITY_OFF
+            _state.value = TaskState.Failed(problem)
+            voiceManager.speak(problem)
+            return
+        }
         stopCurrentTask()
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
         currentJob = scope.launch { runSteps(taskId, label, steps) }
     }
 
-    /**
-     * Emergency stop — halts all execution instantly.
-     * Called by the EmergencyStopButton or future voice command "Hey AURA stop".
-     */
+    /** Emergency stop — halts all execution instantly. */
     fun emergencyStop() {
         Log.w(TAG, "🛑 Emergency stop triggered!")
         stopCurrentTask()
@@ -142,24 +172,28 @@ class TaskManager @Inject constructor(
     }
 
     /**
-     * Soft pause — suspend current execution without destroying the task.
-     * Called from [AURAAccessibilityService.onInterrupt] when the system
-     * temporarily interrupts the service (e.g. incoming call).
-     *
-     * Current implementation cancels like emergency stop, but is kept separate
-     * so Phase 4+ can implement true suspend/resume semantics.
+     * Soft pause — called from [AURAAccessibilityService.onInterrupt].
+     * Currently cancels the task but keeps the last state visible.
      */
     fun pause() {
         Log.w(TAG, "⏸ Task paused (system interrupt)")
         stopCurrentTask()
-        // Keep the last state visible so the user can see what was interrupted.
-        // Do NOT transition to Cancelled — that is only for user-initiated stops.
     }
 
     /** Reset state to Created (ready for next command). */
     fun reset() {
         _state.value = TaskState.Created
         currentTaskId = null
+    }
+
+    /**
+     * Returns a user-readable reason why tasks can't run right now, or null if
+     * everything needed is set up.
+     */
+    fun setupProblem(): String? = when {
+        !actionExecutor.isBound -> ACCESSIBILITY_OFF
+        !apiKeyStore.hasAnyKey() -> "I need an AI key first. Add a Groq or Gemini API key in AURA's Settings."
+        else -> null
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -180,55 +214,93 @@ class TaskManager @Inject constructor(
             _state.value = TaskState.Planning
             Log.i(TAG, "Planning task [$taskId]: $goal")
 
-            // 1. Check skill cache first (L1 RAM → L2 Room via SkillRouter)
+            // 1. Stored skill (L1 RAM → L2 disk → L3 Room) — no LLM call needed
             val cachedSkill = skillRouter.findBestSkill(goal)
             val cachedSteps = cachedSkill?.let { skill ->
                 try {
-                    Json { ignoreUnknownKeys = true }
-                        .decodeFromString(
-                            ListSerializer(ActionStep.serializer()),
-                            skill.steps
-                        )
+                    json.decodeFromString(ListSerializer(ActionStep.serializer()), skill.steps)
                 } catch (_: Exception) { emptyList() }
             }?.takeIf { it.isNotEmpty() }
 
-            val steps: List<ActionStep> = cachedSteps ?: run {
-                    // 2. Recall memory context for richer LLM prompt
-                    val memoryContext = memoryManager.buildContextString(goal)
-
-                    // 3. Fall back to Groq LLM with memory context
-                    val uiSnapshot = actionExecutor.getUiSnapshot()
-                    val llmSteps = groqClient.plan(goal, uiSnapshot, memoryContext = memoryContext)
-                    if (llmSteps.isNotEmpty()) {
-                        // Auto-learn the new skill (OS-tagged, canonical ID)
-                        val appPkg = llmSteps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
-                        scope.launch { skillLearner.learnFromSuccess(goal, llmSteps, appPkg) }
+            if (cachedSkill != null && cachedSteps != null) {
+                Log.i(TAG, "Using stored skill ${cachedSkill.skillId} (${cachedSteps.size} steps)")
+                when (val outcome = runStepsInternal(taskId, goal, cachedSteps)) {
+                    RunOutcome.Success -> {
+                        scope.launch { skillUpdater.recordSuccess(cachedSkill.skillId) }
+                        return
                     }
-                    llmSteps
+                    RunOutcome.Stopped -> return
+                    is RunOutcome.StepFailed -> {
+                        // Self-heal: record the failure, then re-plan with the LLM once.
+                        Log.w(TAG, "Stored skill failed (${outcome.reason}) — re-planning with LLM")
+                        scope.launch { skillUpdater.handleFailure(cachedSkill.skillId, goal) }
+                        voiceManager.speak("That didn't work. Let me try another way.", flush = false)
+                        _state.value = TaskState.Planning
+                    }
                 }
-
-            if (steps.isEmpty()) {
-                fail(taskId, goal, "LLM returned no action steps for goal: $goal")
-                return
             }
+
+            // 2. LLM plan (Groq → Gemini)
+            val steps = planWithLlm(goal)
 
             val clarify = steps.firstOrNull { it.action == ActionStep.CLARIFY }
             if (clarify != null) {
-                fail(taskId, goal, "Goal unclear — ${clarify.clarification}")
+                fail(taskId, goal, clarify.clarification ?: "Can you say that more specifically?")
                 return
             }
 
             Log.i(TAG, "Plan ready — ${steps.size} steps: ${steps.map { it.action }}")
-            runStepsInternal(taskId, goal, steps)
+            when (val outcome = runStepsInternal(taskId, goal, steps)) {
+                RunOutcome.Success -> {
+                    // Only now is the plan known to work — save it as a skill.
+                    val appPkg = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
+                    scope.launch { skillLearner.learnFromSuccess(goal, steps, appPkg) }
+                }
+                is RunOutcome.StepFailed -> fail(taskId, goal, outcome.reason)
+                RunOutcome.Stopped -> { /* state already set */ }
+            }
 
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LlmException) {
+            fail(taskId, goal, e.message ?: "I couldn't plan that.")
         } catch (e: Exception) {
             Log.e(TAG, "Task [$taskId] failed: ${e.message}", e)
-            fail(taskId, goal, e.message ?: "Unknown error")
+            fail(taskId, goal, "Something went wrong: ${e.message ?: "unknown error"}")
         }
     }
 
+    /**
+     * Plan with Groq; if it fails (or has no key) and a Gemini key exists, use Gemini.
+     * @throws LlmException with the most useful user-readable reason.
+     */
+    private suspend fun planWithLlm(goal: String): List<ActionStep> {
+        val memoryContext = memoryManager.buildContextString(goal)
+        val uiSnapshot = actionExecutor.getUiSnapshot()
+
+        var groqError: LlmException? = null
+        if (apiKeyStore.groqKey().isNotBlank()) {
+            try {
+                return groqClient.plan(goal, uiSnapshot, memoryContext = memoryContext)
+            } catch (e: LlmException) {
+                Log.w(TAG, "Groq failed: ${e.message}")
+                groqError = e
+            }
+        }
+        if (geminiClient.isConfigured()) {
+            try {
+                Log.i(TAG, "Falling back to Gemini")
+                return geminiClient.plan(goal, uiSnapshot, memoryContext)
+            } catch (e: LlmException) {
+                Log.w(TAG, "Gemini failed: ${e.message}")
+                throw groqError ?: e
+            }
+        }
+        throw groqError ?: LlmException("No AI key set. Add a Groq or Gemini key in Settings.")
+    }
+
     // ──────────────────────────────────────────────────────────────
-    // Direct step execution (no LLM — Phase 1 test path)
+    // Direct step execution (no LLM)
     // ──────────────────────────────────────────────────────────────
 
     private suspend fun runSteps(taskId: String, label: String, steps: List<ActionStep>) {
@@ -242,7 +314,10 @@ class TaskManager @Inject constructor(
         )
         try {
             Log.i(TAG, "Direct execution [$taskId]: $label (${steps.size} steps)")
-            runStepsInternal(taskId, label, steps)
+            val outcome = runStepsInternal(taskId, label, steps)
+            if (outcome is RunOutcome.StepFailed) fail(taskId, label, outcome.reason)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Direct task [$taskId] failed: ${e.message}", e)
             fail(taskId, label, e.message ?: "Unknown error")
@@ -253,83 +328,73 @@ class TaskManager @Inject constructor(
     // Shared step execution loop
     // ──────────────────────────────────────────────────────────────
 
-    private suspend fun runStepsInternal(taskId: String, goal: String, steps: List<ActionStep>) {
+    /**
+     * Run [steps] in order. Returns [RunOutcome.StepFailed] at the first step that
+     * didn't work (the caller decides whether to re-plan or fail), or
+     * [RunOutcome.Stopped] if the user denied / cancelled (state already set).
+     * On success it sets Completed, announces it and records memory + log.
+     */
+    private suspend fun runStepsInternal(
+        taskId: String,
+        goal: String,
+        steps: List<ActionStep>
+    ): RunOutcome {
         val primaryApp = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
+
         for ((index, step) in steps.withIndex()) {
-            if (_state.value == TaskState.Cancelled) return
+            if (_state.value == TaskState.Cancelled) return RunOutcome.Stopped
 
             // ── AppPermissionManager — user rules override PolicyEngine ──
-            val userDecision = permissionManager.evaluate(
-                action = step,
-                appPackage = primaryApp
-            )
-            when (userDecision) {
-                is PermissionDecision.Deny -> {
-                    auditLogger.logUserDenied(taskId, step, RiskLevel.HIGH)
-                    fail(taskId, goal, userDecision.reason)
-                    return
-                }
-                is PermissionDecision.Allow -> {
-                    // User has explicitly allowed — skip PolicyEngine dialog
-                    _state.value = TaskState.Executing(step, index, steps.size)
-                    voiceManager.narrateStep(step)
-                    auditLogger.logAutoExecuted(taskId, step, RiskLevel.LOW)
-                    actionExecutor.execute(step)
-                    continue
-                }
-                else -> { /* Default or Confirm — fall through to PolicyEngine */ }
+            val userDecision = permissionManager.evaluate(action = step, appPackage = primaryApp)
+            if (userDecision is PermissionDecision.Deny) {
+                auditLogger.logUserDenied(taskId, step, RiskLevel.HIGH)
+                fail(taskId, goal, userDecision.reason)
+                return RunOutcome.Stopped
             }
 
-            // ── PolicyEngine — global risk classification ─────────────
-            val risk = policyEngine.classify(step)
+            val effectiveRisk = if (userDecision is PermissionDecision.Allow) {
+                RiskLevel.LOW
+            } else {
+                val risk = policyEngine.classify(step)
+                // ALWAYS_CONFIRM rule upgrades LOW/MEDIUM to a confirmation
+                if (userDecision is PermissionDecision.Confirm &&
+                    (risk == RiskLevel.LOW || risk == RiskLevel.MEDIUM)) RiskLevel.HIGH else risk
+            }
 
-            // Force confirm if user rule says ALWAYS_CONFIRM (override LOW risk)
-            val effectiveRisk = if (userDecision is PermissionDecision.Confirm &&
-                (risk == RiskLevel.LOW || risk == RiskLevel.MEDIUM)) {
-                RiskLevel.HIGH
-            } else risk
+            if (effectiveRisk == RiskLevel.HIGH || effectiveRisk == RiskLevel.CRITICAL) {
+                val anomaly = anomalyDetector.check(step)
+                val anomalyWarning = (anomaly as? AnomalyResult.Suspicious)?.warningMessage
 
-            when (effectiveRisk) {
-                RiskLevel.LOW, RiskLevel.MEDIUM -> {
-                    _state.value = TaskState.Executing(step, index, steps.size)
-                    voiceManager.narrateStep(step)
-                    auditLogger.logAutoExecuted(taskId, step, risk)
-                    actionExecutor.execute(step)
+                voiceManager.announceConfirmation(step, effectiveRisk)
+                val approved = suspendForApproval(step, effectiveRisk, anomalyWarning)
+                if (!approved) {
+                    auditLogger.logUserDenied(taskId, step, effectiveRisk)
+                    fail(taskId, goal, "Okay, I won't do that.")
+                    return RunOutcome.Stopped
                 }
-                RiskLevel.HIGH, RiskLevel.CRITICAL -> {
-                    // Phase 7: anomaly check before asking user
-                    val anomaly = anomalyDetector.check(step)
-                    val anomalyWarning = if (anomaly is AnomalyResult.Suspicious)
-                        anomaly.warningMessage else null
+                auditLogger.logUserApproved(taskId, step, effectiveRisk)
+            } else {
+                auditLogger.logAutoExecuted(taskId, step, effectiveRisk)
+            }
 
-                    voiceManager.announceConfirmation(step, risk)
-                    val approved = suspendForApproval(step, risk, anomalyWarning)
-                    if (!approved) {
-                        auditLogger.logUserDenied(taskId, step, risk)
-                        fail(taskId, goal, "User denied action: ${step.action}")
-                        return
-                    }
-                    auditLogger.logUserApproved(taskId, step, risk)
-                    _state.value = TaskState.Executing(step, index, steps.size)
-                    voiceManager.narrateStep(step)
-                    actionExecutor.execute(step)
-                }
+            _state.value = TaskState.Executing(step, index, steps.size)
+            voiceManager.narrateStep(step)
+            val result = actionExecutor.execute(step)
+            if (!result.ok) {
+                return RunOutcome.StepFailed(result.error ?: "A step didn't work.")
+            }
+            if (step.action == ActionStep.READ_TEXT && !result.output.isNullOrBlank()) {
+                voiceManager.speak(result.output.take(400), flush = false)
             }
         }
 
         _state.value = TaskState.Verifying
         _state.value = TaskState.Completed("Done!")
-        voiceManager.announceCompletion("Task completed successfully")
+        voiceManager.announceCompletion("Done")
 
-        // Remember this successful task in long-term memory
         scope.launch {
-            memoryManager.remember(
-                goal = goal,
-                outcome = "success",
-                appUsed = primaryApp
-            )
+            memoryManager.remember(goal = goal, outcome = "success", appUsed = primaryApp)
         }
-
         taskLogDao.updateStatus(
             taskId = taskId,
             status = TaskStatus.COMPLETED,
@@ -337,6 +402,7 @@ class TaskManager @Inject constructor(
             error = null
         )
         Log.i(TAG, "✅ Task [$taskId] completed")
+        return RunOutcome.Success
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -345,32 +411,22 @@ class TaskManager @Inject constructor(
 
     /**
      * Suspends execution and transitions to [TaskState.WaitingForUser].
-     * Returns true if the user approved, false if denied.
+     * Returns true if the user approved. Cancellable (emergency stop).
      */
     private suspend fun suspendForApproval(
         step: ActionStep,
         risk: RiskLevel,
         anomalyWarning: String? = null
     ): Boolean {
-        var result = false
-        val latch = java.util.concurrent.CountDownLatch(1)
-
+        val decision = CompletableDeferred<Boolean>()
         _state.value = TaskState.WaitingForUser(
             riskAction = step,
             riskLevel = risk,
             anomalyWarning = anomalyWarning,
-            onAllow = {
-                result = true
-                latch.countDown()
-            },
-            onDeny = {
-                result = false
-                latch.countDown()
-            }
+            onAllow = { decision.complete(true) },
+            onDeny = { decision.complete(false) }
         )
-
-        kotlinx.coroutines.withContext(Dispatchers.IO) { latch.await() }
-        return result
+        return decision.await()
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -379,7 +435,7 @@ class TaskManager @Inject constructor(
 
     private fun fail(taskId: String, goal: String = "", reason: String) {
         _state.value = TaskState.Failed(reason)
-        voiceManager.announceFailure(reason)
+        voiceManager.speak(reason)
         scope.launch {
             if (goal.isNotBlank()) {
                 memoryManager.remember(goal, "failure", "unknown")
@@ -397,5 +453,10 @@ class TaskManager @Inject constructor(
     private fun stopCurrentTask() {
         currentJob?.cancel()
         currentJob = null
+    }
+
+    private companion object {
+        const val ACCESSIBILITY_OFF =
+            "Please turn on AURA in your phone's Accessibility settings first, so I can control apps."
     }
 }

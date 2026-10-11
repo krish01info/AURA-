@@ -68,6 +68,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val groqKey by viewModel.groqKey.collectAsState()
+    val geminiKey by viewModel.geminiKey.collectAsState()
     val voiceNarration by viewModel.voiceNarration.collectAsState()
     val updateInfo by viewModel.updateInfo.collectAsState()
     val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
@@ -134,7 +135,7 @@ fun SettingsScreen(
                         fontSize = 12.sp
                     )
                     Text(
-                        "Llama 3.3 70B  →  Llama 3.1 8B (fast)  →  Gemma 2 9B",
+                        "GPT-OSS 120B  →  GPT-OSS 20B  →  Qwen3.8 27B  →  Gemini (if key set)",
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         fontSize = 12.sp
                     )
@@ -146,6 +147,22 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // ── Fallback LLM ──────────────────────────────────────────────
+            SectionHeader("Gemini API (optional fallback)")
+
+            ApiKeyField(
+                label = "Gemini API Key",
+                value = geminiKey,
+                onValueChange = { viewModel.setGeminiKey(it) },
+                hint = "AIza…"
+            )
+
+            Text(
+                "Used when Groq fails or has no key. Free key: aistudio.google.com",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                fontSize = 11.sp
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 

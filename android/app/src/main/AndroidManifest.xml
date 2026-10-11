@@ -14,7 +14,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Floating overlay (Emergency Stop + Bubble) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -36,6 +35,25 @@
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+
+    <!-- ======================================= -->
+    <!--   PACKAGE VISIBILITY (Android 11+)      -->
+    <!-- ======================================= -->
+    <!-- Without these, Android 11+ hides other apps from AURA:
+         - SpeechRecognizer reports "not available" (voice never works)
+         - getLaunchIntentForPackage() returns null (open_app does nothing) -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".AURAApplication"
@@ -79,28 +97,14 @@
         </service>
 
         <!-- ======================================= -->
-        <!--         FOREGROUND SERVICE              -->
-        <!--  (keeps agent alive in background)      -->
+        <!--   ASSISTANT SERVICE ("Hey AURA")        -->
         <!-- ======================================= -->
-        <service
-            android:name=".agent.AURAForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
-
-        <!-- Wake word listener — runs in background for "Hey AURA" -->
+        <!-- Foreground microphone service: wake word, popup, command, task.
+             The accessibility service keeps the process alive otherwise. -->
         <service
             android:name=".voice.WakeWordService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
-
-        <!-- Boot receiver — restart agent after reboot -->
-        <receiver
-            android:name=".agent.BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
 
         <!-- ======================================= -->
         <!--   FILE PROVIDER — OTA APK installer     -->

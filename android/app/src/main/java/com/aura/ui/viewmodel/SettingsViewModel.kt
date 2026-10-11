@@ -4,9 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.aura.data.model.UpdateInfo
+import com.aura.llm.ApiKeyStore
 import com.aura.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -17,39 +16,31 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val PREFS_FILE = "aura_secure_prefs"
-private const val KEY_GROQ   = "groq_api_key"
 private const val KEY_VOICE  = "voice_narration"
 
 /**
  * SettingsViewModel — persists user preferences and handles update checks.
  *
- * API keys are stored encrypted (AES-256-GCM) via EncryptedSharedPreferences.
+ * API keys are stored encrypted (AES-256-GCM) via [ApiKeyStore], which the LLM
+ * clients read on every request — a new key works immediately.
  * Keys are never transmitted to any AURA server.
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val updateRepository: UpdateRepository
+    private val updateRepository: UpdateRepository,
+    private val apiKeyStore: ApiKeyStore
 ) : ViewModel() {
 
-    private val prefs: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_FILE,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs: SharedPreferences get() = apiKeyStore.settings()
 
     // ── Preferences ───────────────────────────────────────────────────────────
 
-    private val _groqKey = MutableStateFlow(readString(KEY_GROQ))
+    private val _groqKey = MutableStateFlow(apiKeyStore.userGroqKey())
     val groqKey: StateFlow<String> = _groqKey
+
+    private val _geminiKey = MutableStateFlow(apiKeyStore.userGeminiKey())
+    val geminiKey: StateFlow<String> = _geminiKey
 
     private val _voiceNarration = MutableStateFlow(readBool(KEY_VOICE, default = false))
     val voiceNarration: StateFlow<Boolean> = _voiceNarration
@@ -72,7 +63,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setGroqKey(value: String) {
         _groqKey.value = value
-        prefs.edit().putString(KEY_GROQ, value).apply()
+        apiKeyStore.setGroqKey(value)
+    }
+
+    fun setGeminiKey(value: String) {
+        _geminiKey.value = value
+        apiKeyStore.setGeminiKey(value)
     }
 
     fun setVoiceNarration(value: Boolean) {
@@ -92,7 +88,6 @@ class SettingsViewModel @Inject constructor(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    fun getGroqApiKey(): String = prefs.getString(KEY_GROQ, "") ?: ""
-    private fun readString(key: String) = prefs.getString(key, "") ?: ""
+    fun getGroqApiKey(): String = apiKeyStore.groqKey()
     private fun readBool(key: String, default: Boolean) = prefs.getBoolean(key, default)
 }
