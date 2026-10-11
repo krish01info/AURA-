@@ -8,6 +8,9 @@ on:
   # Adds a "Run workflow" button on the Actions tab (e.g. after changing repo secrets)
   workflow_dispatch:
 
+permissions:
+  contents: write   # lets CI commit a newly generated Room schema to a PR branch
+
 jobs:
   build:
     name: Build & Test
@@ -96,15 +99,32 @@ jobs:
           retention-days: 14
 
       # Room writes android/app/schemas/<db>/<version>.json during the build. A new one
-      # must be committed (the next AutoMigration needs it) — warn and publish it.
-      - name: Check Room schema is committed
-        if: always()
+      # must be committed (the next AutoMigration needs it). On a PR from this repo CI
+      # commits it to the PR branch; otherwise it warns (and the artifact below has it).
+      - name: Commit new Room schema
+        if: success()
         shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          new=$(git status --porcelain -- android/app/schemas | awk '{print $2}')
-          if [ -n "$new" ]; then
+          new=$(git status --porcelain --untracked-files=all -- android/app/schemas | awk '{print $2}')
+          [ -z "$new" ] && { echo "Room schemas up to date"; exit 0; }
+          if [ "$SAME_REPO" != "true" ]; then
             for f in $new; do echo "::warning title=Room schema not committed::$f — download the room-schemas artifact and commit it"; done
+            exit 0
           fi
+          tmp=$(mktemp -d)
+          for f in $new; do mkdir -p "$tmp/$(dirname "$f")"; cp "$f" "$tmp/$f"; done
+          git fetch --depth=1 origin "$HEAD_REF"
+          git checkout -f -B "$HEAD_REF" "origin/$HEAD_REF"
+          cp -r "$tmp/android" .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/schemas
+          git commit -m "Add generated Room schema"
+          git push origin "HEAD:$HEAD_REF"
+          echo "::notice title=Room schema committed::$new"
 
       - name: Upload Room schemas
         if: always()

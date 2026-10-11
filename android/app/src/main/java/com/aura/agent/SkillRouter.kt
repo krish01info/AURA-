@@ -14,7 +14,6 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.ln
 
 private const val TAG = "SkillRouter"
 
@@ -172,30 +171,15 @@ class SkillRouter @Inject constructor(
         return best(goal, candidates.distinctBy { it.skillId }) ?: hit
     }
 
+    private val env get() = VariantRanking.Env(os.apiLevel, os.osSkin, os.osClassTag, os.deviceModel)
+
     /** Can this variant run on this phone at all? */
-    fun isCompatible(skill: SkillPackEntity): Boolean {
-        if (skill.isStale || skill.steps.isBlank()) return false
-        if (os.apiLevel < skill.minApiLevel) return false
-        val max = skill.maxApiLevel
-        if (max != null && os.apiLevel > max) return false
-        if (skill.osSkin != null && skill.osSkin != os.osSkin) return false
-        if (skill.osClassTag != UNIVERSAL && skill.osClassTag != os.osClassTag) return false
-        return true
-    }
+    fun isCompatible(skill: SkillPackEntity): Boolean = VariantRanking.isCompatible(skill, env)
 
     /** Higher = made for an environment closer to this phone. */
     private fun specificity(skill: SkillPackEntity, appMajorCache: MutableMap<String, String?>): Double {
-        var score = 0.0
-        if (skill.osSkin != null && skill.osSkin == os.osSkin) score += 40
-        if (skill.osClassTag == os.osClassTag) score += 30
         val installedMajor = appMajorCache.getOrPut(skill.appPackage) { os.appMajorVersion(skill.appPackage) }
-        if (skill.appMajorVersion != null && skill.appMajorVersion == installedMajor) score += 20
-        if (skill.deviceModel != null && skill.deviceModel == os.deviceModel) score += 5
-        score += skill.successRate * 4
-        score += ln(1.0 + skill.usageCount) * 0.3
-        // Shortcut-based steps (intents/links) are more reliable than tapping through screens.
-        if (SHORTCUT_ACTIONS.any { skill.steps.contains("\"$it\"") }) score += 1.0
-        return score
+        return VariantRanking.specificity(skill, env, installedMajor)
     }
 
     private fun <T> decode(raw: String, serializer: kotlinx.serialization.KSerializer<T>): T? = try {
@@ -205,12 +189,7 @@ class SkillRouter @Inject constructor(
     }
 
     private companion object {
-        const val UNIVERSAL = "universal"
         /** Skin + Android group + app version all match — nothing more specific exists. */
-        const val EXACT = 90.0
-        val SHORTCUT_ACTIONS = listOf(
-            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER,
-            ActionStep.INTENT, ActionStep.MEDIA, ActionStep.REPLY
-        )
+        const val EXACT = VariantRanking.EXACT
     }
 }
