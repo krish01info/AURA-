@@ -129,6 +129,13 @@ class SkillCache @Inject constructor(
         Log.d(TAG, "Promoted to L1: ${skill.skillId}")
     }
 
+    /** Replace the RAM copy of [skill] if it's cached (e.g. after counters change). */
+    fun refresh(skill: SkillPackEntity) {
+        synchronized(hotCache) {
+            if (hotCache.containsKey(skill.skillId)) hotCache[skill.skillId] = skill
+        }
+    }
+
     /**
      * Record a cache hit — updates the LRU order.
      */

@@ -31,12 +31,15 @@ enum class SkillHealth {
 @Singleton
 class SkillHealthMonitor @Inject constructor(
     private val localDao: SkillPackDao,
-    private val skillCache: SkillCache
+    private val skillCache: SkillCache,
+    private val diskCache: SkillDiskCache
 ) {
     /**
      * Assess the current health state of a skill.
      */
     fun assess(skill: SkillPackEntity): SkillHealth = when {
+        // One failure (e.g. a contact that doesn't exist) shouldn't kill a skill.
+        skill.failureCount < MIN_FAILURES_FOR_BROKEN && skill.successRate < 0.60f -> SkillHealth.DEGRADED
         skill.successRate >= 0.85f -> SkillHealth.HEALTHY
         skill.successRate >= 0.60f -> SkillHealth.DEGRADED
         else                       -> SkillHealth.BROKEN
@@ -49,6 +52,7 @@ class SkillHealthMonitor @Inject constructor(
     suspend fun recordSuccess(skillId: String) {
         localDao.recordSuccess(skillId)
         localDao.incrementUsage(skillId)
+        localDao.getSkill(skillId)?.let { syncCaches(it) }
         Log.d(TAG, "✅ Success recorded for $skillId")
     }
 
@@ -66,10 +70,22 @@ class SkillHealthMonitor @Inject constructor(
 
         if (health == SkillHealth.BROKEN) {
             localDao.markStale(skillId)
-            skillCache.invalidate(skillId)
-            Log.w(TAG, "🔴 Skill $skillId marked BROKEN and evicted from L1 cache")
+            skillCache.invalidate(skillId) // removes it from RAM and disk
+            Log.w(TAG, "🔴 Skill $skillId marked BROKEN and evicted from RAM + disk")
+        } else {
+            syncCaches(skill)
         }
 
         return health
+    }
+
+    /** Keep the RAM and disk copies' counters in line with Room. */
+    private suspend fun syncCaches(skill: SkillPackEntity) {
+        skillCache.refresh(skill)
+        diskCache.update(skill)
+    }
+
+    private companion object {
+        const val MIN_FAILURES_FOR_BROKEN = 2
     }
 }

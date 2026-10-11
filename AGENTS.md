@@ -44,14 +44,14 @@ com.aura/
 ├── accessibility/  Read the screen (UI tree → text) and find nodes
 ├── agent/          Task lifecycle: goal → plan → run steps → learn
 ├── cloud/          Supabase auth + community skill store client
-├── data/db/        Room database (v6) + DAOs
+├── data/db/        Room database (v7) + DAOs
 ├── data/model/     Entities and data classes (ActionStep, SkillPackEntity, …)
 ├── di/             Hilt modules: Database, Network, Supabase
 ├── llm/            Groq + Gemini planning clients
 ├── macros/         Run a list of goals in sequence
 ├── memory/         Offline embeddings + recall of past tasks
 ├── policy/         Risk classification, per-app rules, injection defence, audit
-├── skills/         Learned-skill caches, scoring, health, OS adaptation
+├── skills/         Skills: per-OS variants, phrase matching, learning, RAM/disk caches, health
 ├── ui/             Compose screens, ViewModels, theme, MainActivity, NavHost
 ├── update/         APK self-update from GitHub Releases
 ├── voice/          Assistant service ("Hey AURA" → popup → task), TTS/STT, bubble
@@ -66,19 +66,20 @@ com.aura/
      └─ TaskManager.execute(goal)          typed commands enter here too
          ├─ PromptInjectionDefender.sanitize/validate
          ├─ setupProblem()?  → speak why (Accessibility off / no API key) and stop
-         ├─ SkillRouter.findBestSkill(goal)   L1 RAM → L2 disk → L3 Room
-         │     hit  → run stored steps; on a failed step → SkillUpdater + re-plan once
+         ├─ SkillRouter.findSkill(goal)   L1 RAM → L2 disk → L3 Room → L4 cloud
+         │     (variants compatible with this phone; phrase pattern fills {slots})
+         │     hit  → run filled steps — NO LLM call; failed step → SkillUpdater + re-plan once
          │     miss → MemoryManager context + UIObserver snapshot (≤2000 chars)
-         │            → GroqClient.plan  (fails / no key → GeminiClient.plan)
+         │            → GroqClient.plan  (fails / no key → GeminiClient.plan) → Plan
          └─ runStepsInternal(steps), per step:
                AppPermissionManager.evaluate → PolicyEngine.classify
                LOW/MEDIUM → ActionExecutor.execute → StepResult (stop on failure)
                HIGH/CRITICAL → WaitingForUser; popup or HomeScreen asks
                                (voice yes/no for HIGH, BiometricGate for CRITICAL)
-            success → SkillLearner.learnFromSuccess + MemoryManager.remember
+            success → SkillLearner.learn (saves this phone's variant) + MemoryManager.remember
 ```
 
-- `SkillRepository` has the same lookup plus **L4 Supabase cloud**; it backs the Skill Store screen.
+- Skill model and rules: `skills/package.md`. `SkillRepository` only serves the Skill Store UI.
 
 ## 5. Conventions
 
@@ -87,8 +88,8 @@ com.aura/
 - Risk → always `PolicyEngine.classify()`; never hard-code risk in UI.
 - New action type → constant in `ActionStep` companion + branch in `ActionExecutor.execute()`.
 - New screen → route in `ui/AURAApp.kt` NavHost + its own ViewModel.
-- New table → entity + DAO + register in `AURADatabase.kt` + bump version + migration.
-- New skill from a plan → `SkillLearner.learnFromSuccess()`; never insert `SkillPackEntity` by hand.
+- New table / column → entity + DAO + `AURADatabase.kt` version bump + `AutoMigration`; commit the generated schema JSON.
+- New skill from a plan → `SkillLearner.learn()`; never insert `SkillPackEntity` by hand.
 - Cloud calls → check `SupabaseModule.isConfigured` and no-op when false.
 - API keys → read through `llm/ApiKeyStore`; never `BuildConfig` directly, never in source.
 - Voice listening → only through `voice/WakeWordService` (one SpeechRecognizer at a time).

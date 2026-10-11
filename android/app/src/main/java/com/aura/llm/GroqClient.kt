@@ -1,7 +1,6 @@
 package com.aura.llm
 
 import android.util.Log
-import com.aura.data.model.ActionStep
 import com.aura.data.model.ChatMessage
 import com.aura.data.model.ChatRequest
 import com.aura.data.model.ChatResponse
@@ -63,7 +62,7 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
         uiContext: String,
         activeModel: String? = null,
         memoryContext: String = ""
-    ): List<ActionStep> {
+    ): Plan {
         val userContent = PlannerPrompt.userMessage(goal, uiContext, memoryContext)
         val cascade = if (activeModel != null) listOf(activeModel to activeModel) else MODEL_CASCADE
         var lastError: LlmException? = null
@@ -88,13 +87,13 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
                     lastError = LlmException("The AI model returned an empty answer.")
                     continue
                 }
-                val steps = PlannerPrompt.parseSteps(content)
-                if (steps.isEmpty()) {
+                val plan = PlannerPrompt.parsePlan(content)
+                if (plan.steps.isEmpty()) {
                     lastError = LlmException("The AI model's answer couldn't be understood.")
                     continue
                 }
-                Log.i(TAG, "✅ $modelName returned ${steps.size} steps: ${steps.map { it.action }}")
-                return steps
+                Log.i(TAG, "✅ $modelName returned ${plan.steps.size} steps: ${plan.steps.map { it.action }}")
+                return plan
 
             } catch (e: HttpException) {
                 val body = try { e.response()?.errorBody()?.string()?.take(300) } catch (_: Exception) { null }

@@ -1,189 +1,176 @@
 package com.aura.agent
 
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
 import android.util.Log
+import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
+import com.aura.data.model.ActionStep
 import com.aura.data.model.SkillPackEntity
 import com.aura.skills.OsFingerprint
 import com.aura.skills.SkillCache
 import com.aura.skills.SkillDiskCache
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.aura.skills.SkillMatcher
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.ln
 
 private const val TAG = "SkillRouter"
 
+/** A stored skill variant that fits the goal, with its steps already filled in. */
+data class SkillMatch(
+    val skill: SkillPackEntity,
+    val params: Map<String, String>,
+    val steps: List<ActionStep>,
+    val layer: String
+)
+
 /**
- * SkillRouter — 3-layer skill lookup with OS-aware scoring.
+ * SkillRouter — finds a stored skill for a goal so no LLM call is needed.
  *
- * Lookup chain (L1 → L2 → L3 → null):
- *   L1: RAM hot cache (SkillCache)   — <1 ms  — top-20 most-used in RAM
- *   L2: Disk cache (SkillDiskCache)  — 1–5 ms — JSON files, keyword-indexed
- *   L3: Room DB (SkillPackDao)       — 5–15ms  — all skills ever learned
- *   null → caller falls back to LLM planning
+ * Lookup chain (first layer with a usable match wins):
+ *   L1 RAM   (SkillCache, top ~20 most used)        → instant
+ *   L2 disk  (SkillDiskCache, JSON + keyword index)  → promote to RAM
+ *   L3 Room  (source of truth on the phone)          → write to disk + RAM
+ *   L4 cloud (Supabase, only compatible variants)    → save to Room + disk + RAM
+ *   none     → null: TaskManager plans with the LLM and SkillLearner saves the result
  *
- * When multiple skills match, the scoring system picks the winner.
- *
- * Scoring factors (from SKILL-SYSTEM.md):
- *   1. Keyword match count    (max 50 pts)
- *   2. Exact phrase match     (+20 pts)
- *   3. Success rate           (max 50 pts)
- *   4. Usage count popularity (max 20 pts)
- *   5. Verified badge         (+15 pts)
- *   6. Device-specific match  (+10 pts)
- *   7. App version match      (+5 pts)
- *   8. OS class tag match     (+25 pts exact, +10 pts universal)
- *   9. OS skin match          (+20 pts exact, +8 pts null=any)
- *  10. Target API level match (+10 pts)
+ * A variant is usable only if:
+ *   - it's compatible with this phone: not stale, Android version in range,
+ *     same OEM skin (or "any"), same Android version group (or "universal");
+ *   - one of its phrase patterns matches the goal (SkillMatcher), and
+ *   - every `{slot}` in its steps gets a value from that match.
+ * Among usable variants the most specific wins: skin → Android group → app major
+ * version → device, then success rate. If a fast layer only has a generic variant,
+ * Room is checked for a more specific variant of the same task.
  */
 @Singleton
 class SkillRouter @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val skillCache: SkillCache,
     private val diskCache: SkillDiskCache,
     private val localDao: SkillPackDao,
-    private val osFingerprint: OsFingerprint
+    private val cloudApi: SupabaseSkillApi,
+    private val os: OsFingerprint
 ) {
-    /**
-     * Find the best skill for the given goal.
-     * Returns null if no suitable skill is found — caller invokes LLM.
-     */
-    suspend fun findBestSkill(goal: String): SkillPackEntity? {
-        val keywords = extractKeywords(goal)
+    private val json = Json { ignoreUnknownKeys = true }
+    private val stepsSerializer = ListSerializer(ActionStep.serializer())
+    private val stringsSerializer = ListSerializer(String.serializer())
 
-        // ── L1: RAM cache — instant (<1 ms) ─────────────────────────
-        val l1Candidates = skillCache.getAll(keywords)
-        if (l1Candidates.isNotEmpty()) {
-            val best = l1Candidates.maxByOrNull { scoreSkill(it, goal) }
-            if (best != null) {
-                skillCache.recordHit(best.skillId)
-                skillCache.flushEvictions()          // persist any LRU evictions to disk
-                Log.d(TAG, "L1 hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
-                return best
-            }
+    suspend fun findSkill(goal: String): SkillMatch? {
+        val keywords = SkillMatcher.keywords(goal)
+
+        // ── L1: RAM ────────────────────────────────────────────────
+        best(goal, skillCache.snapshot())?.let { m ->
+            val final = preferMoreSpecific(goal, m)
+            skillCache.recordHit(final.skill.skillId)
+            if (final !== m) skillCache.promote(final.skill)
+            return done(final, "ram")
+        }
+        if (keywords.isEmpty()) return null
+
+        // ── L2: disk ───────────────────────────────────────────────
+        best(goal, diskCache.findByKeywords(keywords))?.let { m ->
+            val final = preferMoreSpecific(goal, m)
+            skillCache.promote(final.skill)
+            skillCache.flushEvictions()
+            return done(final, "disk")
         }
 
-        // ── L2: Disk cache — JSON files (1–5 ms) ────────────────────
-        val l2Candidates = diskCache.findByKeywords(keywords)
-        if (l2Candidates.isNotEmpty()) {
-            val best = l2Candidates.maxByOrNull { scoreSkill(it, goal) }
-            if (best != null) {
-                skillCache.promote(best)             // pull into L1 RAM for next access
-                skillCache.flushEvictions()
-                Log.d(TAG, "L2 disk hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
-                return best
-            }
+        // ── L3: Room ───────────────────────────────────────────────
+        val roomCandidates = keywords.flatMap { localDao.findByKeyword(it) }.distinctBy { it.skillId }
+        best(goal, roomCandidates)?.let { m ->
+            diskCache.put(m.skill)
+            skillCache.promote(m.skill)
+            skillCache.flushEvictions()
+            return done(m, "room")
         }
 
-        // ── L3: Room DB — source of truth (5–15 ms) ─────────────────
-        val l3Candidates = mutableListOf<SkillPackEntity>()
-        for (keyword in keywords) {
-            l3Candidates += localDao.findByKeyword(keyword)
+        // ── L4: cloud (download) ──────────────────────────────────
+        val cloudCandidates = cloudApi.searchSkills(keywords, os.osClassTag, os.osSkin).orEmpty()
+        best(goal, cloudCandidates)?.let { m ->
+            localDao.upsert(m.skill)
+            diskCache.put(m.skill)
+            skillCache.promote(m.skill)
+            skillCache.flushEvictions()
+            return done(m, "cloud")
         }
 
-        if (l3Candidates.isNotEmpty()) {
-            val best = l3Candidates.maxByOrNull { scoreSkill(it, goal) }
-            if (best != null) {
-                diskCache.put(best)                  // write to L2 — next access won't hit Room
-                skillCache.promote(best)             // pull into L1 RAM
-                skillCache.flushEvictions()
-                Log.d(TAG, "L3 DB hit: ${best.skillId} (score=${scoreSkill(best, goal)})")
-                return best
-            }
-        }
-
-        Log.d(TAG, "No skill found for: $goal → LLM will plan")
+        Log.d(TAG, "No stored skill for \"$goal\" → LLM will plan")
         return null
     }
 
+    private fun done(m: SkillMatch, layer: String): SkillMatch {
+        Log.i(TAG, "Skill hit [$layer]: ${m.skill.displayName} (${m.skill.skillId}) params=${m.params.keys}")
+        return m.copy(layer = layer)
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Selection
+    // ──────────────────────────────────────────────────────────────
+
+    private fun best(goal: String, candidates: List<SkillPackEntity>): SkillMatch? {
+        if (candidates.isEmpty()) return null
+        val appMajor = mutableMapOf<String, String?>()
+        return candidates.asSequence()
+            .filter { isCompatible(it) }
+            .mapNotNull { skill -> matchSkill(goal, skill) }
+            .maxByOrNull { specificity(it.skill, appMajor) }
+    }
+
+    private fun matchSkill(goal: String, skill: SkillPackEntity): SkillMatch? {
+        val patterns = decode(skill.phrasePatterns, stringsSerializer) ?: return null
+        val params = SkillMatcher.match(goal, patterns) ?: return null
+        val template = decode(skill.steps, stepsSerializer)?.takeIf { it.isNotEmpty() } ?: return null
+        val filled = SkillMatcher.fill(template, params) ?: return null
+        return SkillMatch(skill, params, filled, "")
+    }
+
     /**
-     * OS-aware multi-factor scoring (from SKILL-SYSTEM.md, page 1454–1498).
-     * Higher score = better match.
+     * A RAM/disk hit may be a generic (e.g. universal) variant while Room holds a
+     * variant made for this exact phone. Check the task's other variants once.
      */
-    private fun scoreSkill(skill: SkillPackEntity, goal: String): Float {
-        var score = 0f
-        val goalLower = goal.lowercase()
-        val keywords = parseKeywordList(skill.triggerKeywords)
+    private suspend fun preferMoreSpecific(goal: String, hit: SkillMatch): SkillMatch {
+        val appMajor = mutableMapOf<String, String?>()
+        if (hit.skill.intentId.isBlank() || specificity(hit.skill, appMajor) >= EXACT) return hit
+        val siblings = localDao.getVariantsForIntent(hit.skill.intentId)
+        val better = best(goal, siblings) ?: return hit
+        return if (specificity(better.skill, appMajor) > specificity(hit.skill, appMajor)) better else hit
+    }
 
-        // Factor 1: Keyword match count (max 50 pts)
-        val matchCount = keywords.count { goalLower.contains(it.lowercase()) }
-        score += matchCount * 10f
+    /** Can this variant run on this phone at all? */
+    fun isCompatible(skill: SkillPackEntity): Boolean {
+        if (skill.isStale || skill.steps.isBlank()) return false
+        if (os.apiLevel < skill.minApiLevel) return false
+        val max = skill.maxApiLevel
+        if (max != null && os.apiLevel > max) return false
+        if (skill.osSkin != null && skill.osSkin != os.osSkin) return false
+        if (skill.osClassTag != UNIVERSAL && skill.osClassTag != os.osClassTag) return false
+        return true
+    }
 
-        // Factor 2: Exact phrase match bonus (20 pts)
-        if (keywords.any { it.lowercase() == goalLower }) score += 20f
-
-        // Factor 3: Success rate (max 50 pts)
-        score += skill.successRate * 50f
-
-        // Factor 4: Usage count popularity (max 20 pts)
-        score += minOf(skill.usageCount / 500f, 20f)
-
-        // Factor 5: Community verified badge (15 pts)
-        if (skill.isVerified) score += 15f
-
-        // Factor 6: Device-specific match (10 pts)
-        if (skill.deviceModel != null && skill.deviceModel == Build.MODEL) score += 10f
-
-        // Factor 7: App version match (5 pts)
-        val installedVer = getInstalledAppVersion(skill.appPackage)
-        if (installedVer != null && installedVer == skill.appVersion) score += 5f
-
-        // ── NEW: OS match bonuses ──────────────────────────────────
-
-        // Factor 8: OS class tag match (25 pts exact, 10 pts universal)
-        when {
-            skill.osClassTag == osFingerprint.osClassTag -> score += 25f
-            skill.osClassTag == "universal"              -> score += 10f
-        }
-
-        // Factor 9: OS skin match (20 pts exact, 8 pts null=any)
-        when {
-            skill.osSkin != null && skill.osSkin == osFingerprint.osSkin -> score += 20f
-            skill.osSkin == null                                          -> score += 8f
-        }
-
-        // Factor 10: Exact target API level match (10 pts)
-        if (skill.targetApiLevel == osFingerprint.apiLevel) score += 10f
-
+    /** Higher = made for an environment closer to this phone. */
+    private fun specificity(skill: SkillPackEntity, appMajorCache: MutableMap<String, String?>): Double {
+        var score = 0.0
+        if (skill.osSkin != null && skill.osSkin == os.osSkin) score += 40
+        if (skill.osClassTag == os.osClassTag) score += 30
+        val installedMajor = appMajorCache.getOrPut(skill.appPackage) { os.appMajorVersion(skill.appPackage) }
+        if (skill.appMajorVersion != null && skill.appMajorVersion == installedMajor) score += 20
+        if (skill.deviceModel != null && skill.deviceModel == os.deviceModel) score += 5
+        score += skill.successRate * 4
+        score += ln(1.0 + skill.usageCount) * 0.3
         return score
     }
 
-    // ── Helpers ───────────────────────────────────────────────────
-
-    /**
-     * Extract search keywords from a natural language goal.
-     * Removes stopwords, lowercases, deduplicates.
-     */
-    fun extractKeywords(goal: String): List<String> {
-        val stopWords = setOf("the", "a", "an", "to", "for", "in", "on", "at",
-                              "and", "or", "of", "with", "my", "me", "it", "i",
-                              "please", "can", "you", "is", "are", "do", "does")
-        return goal.lowercase()
-            .split(" ", ",", ".", "!", "?")
-            .map { it.trim() }
-            .filter { it.length > 2 && it !in stopWords }
-            .distinct()
-            .take(8) // limit to avoid DB over-querying
+    private fun <T> decode(raw: String, serializer: kotlinx.serialization.KSerializer<T>): T? = try {
+        json.decodeFromString(serializer, raw)
+    } catch (_: Exception) {
+        null
     }
 
-    private fun parseKeywordList(json: String): List<String> {
-        return try {
-            json.removePrefix("[").removeSuffix("]")
-                .split(",")
-                .map { it.trim().removeSurrounding("\"") }
-                .filter { it.isNotBlank() }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun getInstalledAppVersion(packageName: String): String? {
-        return try {
-            context.packageManager
-                .getPackageInfo(packageName, 0)
-                .versionName
-        } catch (_: PackageManager.NameNotFoundException) { null }
+    private companion object {
+        const val UNIVERSAL = "universal"
+        /** Skin + Android group + app version all match — nothing more specific exists. */
+        const val EXACT = 90.0
     }
 }

@@ -38,7 +38,10 @@ class SupabaseSkillApi @Inject constructor(
 
     @Serializable
     data class CloudSkill(
-        @SerialName("skill_id")         val skillId: String,
+        @SerialName("skill_id")         val skillId: String,          // variant id
+        @SerialName("intent_id")        val intentId: String = "",
+        @SerialName("phrase_patterns")  val phrasePatterns: String = "[]",
+        @SerialName("app_major_version") val appMajorVersion: String? = null,
         @SerialName("app_package")      val appPackage: String,
         @SerialName("intent_category")  val intentCategory: String = "unknown",
         @SerialName("intent_action")    val intentAction: String = "unknown",
@@ -70,6 +73,9 @@ class SupabaseSkillApi @Inject constructor(
         /** Convert cloud DTO → local Room entity. */
         fun toEntity(): SkillPackEntity = SkillPackEntity(
             skillId        = skillId,
+            intentId       = intentId,
+            phrasePatterns = phrasePatterns,
+            appMajorVersion = appMajorVersion,
             appPackage     = appPackage,
             intentCategory = intentCategory,
             intentAction   = intentAction,
@@ -115,23 +121,34 @@ class SupabaseSkillApi @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * Search community skills by keyword list.
-     * Called by SkillRepository/SkillRouter as L4 after local layers miss.
-     *
-     * Filters to non-stale skills only. Results sorted by downloads desc.
-     * Returns null on any error so callers fall through to LLM.
+     * Search community skill variants by keyword (L4 of the lookup chain).
+     * Only variants usable on this phone are returned: same Android version group
+     * or universal, and same OEM skin or "any" (null). Non-stale only.
+     * Returns null on any error so callers fall through to the LLM.
      */
-    suspend fun searchSkills(keywords: List<String>): List<SkillPackEntity>? {
-        if (!SupabaseModule.isConfigured) return null
+    suspend fun searchSkills(
+        keywords: List<String>,
+        osClassTag: String,
+        osSkin: String?
+    ): List<SkillPackEntity>? {
+        if (!SupabaseModule.isConfigured || keywords.isEmpty()) return null
         return try {
             val results = supabase.postgrest[TABLE]
                 .select {
                     filter {
                         or { keywords.forEach { kw -> ilike("trigger_keywords", "%$kw%") } }
                         eq("is_stale", false)
+                        or {
+                            eq("os_class_tag", osClassTag)
+                            eq("os_class_tag", "universal")
+                        }
+                        or {
+                            if (osSkin != null) eq("os_skin", osSkin)
+                            exact("os_skin", null)
+                        }
                     }
-                    order("downloads", Order.DESCENDING)
-                    limit(10)
+                    order("success_rate", Order.DESCENDING)
+                    limit(25)
                 }
                 .decodeList<CloudSkill>()
             Log.d(TAG, "Cloud search(${keywords}) → ${results.size} results")
@@ -175,14 +192,17 @@ class SupabaseSkillApi @Inject constructor(
      * Upload a locally-learned skill to the community store.
      * Called by SkillLearner after a successful task if user has opted in.
      *
-     * Uses UPSERT so if the canonical skillId already exists (same intent),
-     * it only updates if our version/quality is higher (handled by DB constraint).
+     * UPSERT on the variant id: each skin / Android group / app version keeps its
+     * own row, so uploads from different phones never overwrite each other.
      */
     suspend fun uploadSkill(skill: SkillPackEntity): Boolean {
         if (!SupabaseModule.isConfigured) return false
         return try {
             val cloud = CloudSkill(
                 skillId        = skill.skillId,
+                intentId       = skill.intentId,
+                phrasePatterns = skill.phrasePatterns,
+                appMajorVersion = skill.appMajorVersion,
                 appPackage     = skill.appPackage,
                 intentCategory = skill.intentCategory,
                 intentAction   = skill.intentAction,
