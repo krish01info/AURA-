@@ -26,6 +26,11 @@ Read it, then only the `package.md` of the package you're changing.
   Play Store search missed, saying "no" got stuck, mic flickered on/off. Fixed in the "device-test fixes" PR
   (compound-command guard in `SkillMatcher`, new `call` action, more Play Store phrases, `ApprovalParser` +
   "what should I do instead?", wake-session backoff). **Not re-tested on the phone yet** — ask the owner.
+- ⚠️ Second phone test (2026-10-11, tester): on-screen (floating) mic did nothing (in-app mic worked); "play the
+  song" placed a call; YouTube search opened but didn't play; AI didn't know the current screen. Fixed in
+  "device-test round 2": floating mic talks to the running service, offline "Hey AURA" when the voice model is
+  downloaded, `verify_playing` + YouTube taps the first result, unrequested calls need approval, snapshot has
+  `[app]` + long labels. **Not re-tested yet** — get logcat if the mic still fails.
 - ✅ Popup controls (2026-10-11): **Stop** on the working banner, **Wrong** after Done (drops that skill, asks
   what you wanted), app-lock wait ("Unlock the app", 45 s, then retries the step). Not phone-tested yet.
 - ⚠️ Cloud (Supabase) isn't configured yet. To turn it on: create a Supabase project, run

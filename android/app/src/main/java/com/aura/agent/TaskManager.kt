@@ -521,7 +521,17 @@ class TaskManager @Inject constructor(
                     (risk == RiskLevel.LOW || risk == RiskLevel.MEDIUM)) RiskLevel.HIGH else risk
             }
 
-            if (effectiveRisk == RiskLevel.HIGH || effectiveRisk == RiskLevel.CRITICAL) {
+            // A call the user didn't ask for (e.g. the AI planned one for "play the song")
+            // must be confirmed: calling the wrong person can't be undone.
+            if (step.action == ActionStep.CALL && !CALL_WORDS.containsMatchIn(goal.lowercase())) {
+                val gate = step.copy(message = "Call ${step.number}? You didn't say \"call\", so I'm checking first.")
+                voiceManager.announceConfirmation(gate, RiskLevel.HIGH)
+                if (!suspendForApproval(gate, RiskLevel.HIGH)) {
+                    auditLogger.logUserDenied(taskId, step, RiskLevel.HIGH)
+                    fail(taskId, goal, "Okay, I won't call.")
+                    return RunOutcome.Stopped
+                }
+            } else if (effectiveRisk == RiskLevel.HIGH || effectiveRisk == RiskLevel.CRITICAL) {
                 val anomaly = anomalyDetector.check(step)
                 val anomalyWarning = (anomaly as? AnomalyResult.Suspicious)?.warningMessage
 
@@ -671,6 +681,8 @@ class TaskManager @Inject constructor(
     private companion object {
         /** How many times a task may re-plan from the current screen after a failed step. */
         const val MAX_RECOVERIES = 2
+        /** Words that mean the user asked for a phone call (English + Hindi). */
+        val CALL_WORDS = Regex("\\b(call|calling|phone|ring|dial)\\b|फ़ोन|फोन|कॉल|phone karo|call karo")
         /** How long AURA waits for the user to unlock an app before giving up. */
         const val UNLOCK_TIMEOUT_MS = 45_000L
         const val UNLOCK_POLL_MS = 700L
@@ -680,7 +692,7 @@ class TaskManager @Inject constructor(
         val NO_AUTO_VERIFY = setOf(
             ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
             ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS,
-            ActionStep.LISTEN
+            ActionStep.LISTEN, ActionStep.VERIFY_PLAYING
         )
         const val ACCESSIBILITY_OFF =
             "Please turn on AURA in your phone's Accessibility settings first, so I can control apps."

@@ -1,5 +1,5 @@
 {
- "version": 3,
+ "version": 4,
  "note": "AURA app shortcuts. Each entry becomes a built-in skill (no LLM, no screen tapping where possible). Edit and bump 'version'; phones fetch this file daily from GitHub. Step keys: see data/model/ActionStep.kt.",
  "skills": [
   {
@@ -398,6 +398,9 @@
       "query": "{query}",
       "android.intent.extra.focus": "vnd.android.cursor.item/*"
      }
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },
@@ -440,6 +443,9 @@
       "query": "{query}",
       "android.intent.extra.focus": "vnd.android.cursor.item/*"
      }
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },
@@ -463,6 +469,9 @@
       "query": "{query}",
       "android.intent.extra.focus": "vnd.android.cursor.item/*"
      }
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },
@@ -487,6 +496,9 @@
       "query": "{query}",
       "android.intent.extra.focus": "vnd.android.cursor.item/*"
      }
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },
@@ -498,7 +510,6 @@
    "risk": "LOW",
    "description": "YouTube: search",
    "patterns": [
-    "play {search_query} on youtube",
     "search {search_query} on youtube",
     "search youtube for {search_query}",
     "find {search_query} on youtube",
@@ -517,6 +528,38 @@
     {
      "action": "verify",
      "pkg": "com.google.android.youtube"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.youtube",
+   "category": "media",
+   "action": "play_video",
+   "name": "YouTube: play",
+   "risk": "LOW",
+   "description": "Searches YouTube and plays the first result",
+   "patterns": [
+    "play {search_query} on youtube",
+    "play {search_query} video on youtube",
+    "watch {search_query} on youtube",
+    "play the video {search_query} on youtube"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.youtube",
+     "uri": "https://www.youtube.com/results?search_query={search_query}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2500
+    },
+    {
+     "action": "tap",
+     "text": "play video|Play video"
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },
@@ -561,6 +604,9 @@
     {
      "action": "media",
      "text": "play"
+    },
+    {
+     "action": "verify_playing"
     }
    ]
   },

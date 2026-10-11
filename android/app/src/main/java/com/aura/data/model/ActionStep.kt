@@ -105,6 +105,9 @@ data class ActionStep(
         /** Check the task worked: app [pkg] in front and/or [text] visible. Fails the step if not. */
         const val VERIFY            = "verify"
 
+        /** Check that audio/video is actually playing (waits a few seconds). Fails if nothing plays. */
+        const val VERIFY_PLAYING    = "verify_playing"
+
         // Shortcuts — launched as Android intents
         const val DIAL              = "dial"       // opens the dialer with [number] (doesn't call)
         const val CALL              = "call"       // places a call to [number] (dialer + Call button without the permission)
@@ -150,6 +153,7 @@ data class ActionStep(
             PRESS_KEY,
             CLARIFY,
             VERIFY,
+            VERIFY_PLAYING,
             DIAL,
             CALL,
             SMS,

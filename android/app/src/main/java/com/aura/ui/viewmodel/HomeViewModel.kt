@@ -156,6 +156,10 @@ class HomeViewModel @Inject constructor(
     fun startVoiceInput() {
         if (!WakeWordService.listenNow(context)) {
             _statusMessage.value = "Couldn't start the microphone — check AURA's permissions"
+            // From the floating mic this runs over another app, where the status line isn't visible.
+            android.widget.Toast.makeText(
+                context, "AURA's mic is off — open AURA once to turn it back on", android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 

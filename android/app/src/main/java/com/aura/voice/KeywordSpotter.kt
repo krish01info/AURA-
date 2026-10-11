@@ -88,6 +88,21 @@ class KeywordSpotter @Inject constructor(
     private val loadLock = Mutex()
     @Volatile private var model: Model? = null
 
+    /**
+     * True if the model knows [word] (so a grammar with it can match). Models without a
+     * word list are assumed to know it.
+     */
+    fun knowsWord(word: String): Boolean {
+        val list = listOf(File(modelDir, "graph/words.txt"), File(modelDir, "words.txt")).firstOrNull { it.isFile }
+            ?: return isModelPresent()
+        val w = word.lowercase()
+        return try {
+            list.useLines { lines -> lines.any { it.substringBefore(' ') == w } }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun isModelPresent() = File(modelDir, "am").isDirectory || File(modelDir, "conf").isDirectory
 
     // ──────────────────────────────────────────────────────────────

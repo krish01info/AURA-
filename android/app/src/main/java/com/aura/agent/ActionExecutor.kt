@@ -162,6 +162,7 @@ class ActionExecutor @Inject constructor(
                 ActionStep.LISTEN       -> StepResult.fail("A live task must be run by TaskManager.")
                 ActionStep.READ_TEXT    -> StepResult(true, output = readText(step.text))
                 ActionStep.VERIFY       -> verify(step.pkg, step.text)
+                ActionStep.VERIFY_PLAYING -> verifyPlaying()
                 ActionStep.DIAL         -> dial(step.number)
                 ActionStep.CALL         -> call(step.number)
                 ActionStep.SMS          -> sms(step.number, step.inputText ?: step.message)
@@ -446,6 +447,17 @@ class ActionExecutor @Inject constructor(
         return StepResult.fail("I did the steps but couldn't confirm it worked (expected $what).")
     }
 
+    /** Pass once something is playing audio (music or video); a search page alone isn't enough. */
+    private suspend fun verifyPlaying(): StepResult {
+        val am = appContext.getSystemService(AudioManager::class.java) ?: return StepResult.OK
+        val deadline = System.currentTimeMillis() + PLAYING_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (am.isMusicActive) return StepResult.OK
+            delay(FIND_POLL_MS)
+        }
+        return StepResult.fail("I found it, but nothing is playing yet.")
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Shortcuts — Android intents, no screen tapping
     // ──────────────────────────────────────────────────────────────
@@ -644,7 +656,7 @@ class ActionExecutor @Inject constructor(
 
     companion object {
         val NO_SERVICE_NEEDED = setOf(
-            ActionStep.WAIT, ActionStep.CONFIRM_SEND,
+            ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY_PLAYING,
             ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK,
             ActionStep.INTENT, ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY,
             ActionStep.READ_NOTIFICATIONS
@@ -667,6 +679,8 @@ class ActionExecutor @Inject constructor(
             return action in ALLOWED_INTENT_ACTIONS || action.startsWith("android.settings.")
         }
         const val VERIFY_TIMEOUT_MS = 5000L
+        /** Apps can take a while to start playing after a search. */
+        private const val PLAYING_TIMEOUT_MS = 8000L
         private const val TOUCH_THROUGH_SETTLE_MS = 80L
         private const val NEEDS_CALL_PERMISSION =
             "I opened the dialer but couldn't press Call. Allow AURA to make phone calls (Settings → Apps → AURA → Permissions)."
@@ -681,7 +695,7 @@ class ActionExecutor @Inject constructor(
         const val TAP_EFFECT_TIMEOUT_MS = 2500L
         /** Steps that don't change the screen, so there's nothing to wait for afterwards. */
         val NO_SETTLE = setOf(
-            ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY, ActionStep.READ_TEXT,
+            ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY, ActionStep.VERIFY_PLAYING, ActionStep.READ_TEXT,
             ActionStep.FIND_ELEMENT, ActionStep.ALARM, ActionStep.TIMER, ActionStep.MEDIA,
             ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
         )

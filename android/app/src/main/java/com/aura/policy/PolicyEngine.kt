@@ -48,6 +48,7 @@ class PolicyEngine @Inject constructor() {
         ActionStep.FIND_ELEMENT,
         ActionStep.READ_TEXT,
         ActionStep.VERIFY,
+        ActionStep.VERIFY_PLAYING,
         // The words' own steps are checked by LiveTaskRunner before listening starts.
         ActionStep.LISTEN        -> RiskLevel.LOW
 

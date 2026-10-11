@@ -11,3 +11,4 @@ Reads what is on screen and finds UI nodes to act on.
 ## Rules
 - The 2000-char snapshot cap is the biggest part of each LLM prompt; change it with care.
 - Gestures are performed in `agent/ActionExecutor.kt`, not here.
+- The screen snapshot starts with `[app] <label> (<package>)` and keeps long content descriptions (shortened to 120 chars) — YouTube-style lists label results only that way.
