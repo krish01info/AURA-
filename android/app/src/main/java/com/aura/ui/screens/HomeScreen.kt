@@ -79,6 +79,7 @@ import com.aura.ui.theme.AuraSecondary
 import com.aura.ui.theme.AuraSuccess
 import com.aura.ui.theme.AuraWarning
 import com.aura.ui.viewmodel.HomeViewModel
+import com.aura.voice.KeywordSpotter
 
 /**
  * HomeScreen — the main AURA interface.
@@ -101,6 +102,8 @@ fun HomeScreen(
     val isListening by viewModel.isListening.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
     val isVoiceEnabled by viewModel.isVoiceEnabled.collectAsState()
+    val voiceModelState by viewModel.voiceModelState.collectAsState()
+    val voiceModelOfferDismissed by viewModel.voiceModelOfferDismissed.collectAsState()
     var commandText by remember { mutableStateOf("") }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -198,6 +201,18 @@ fun HomeScreen(
                         }
                         Spacer(Modifier.height(12.dp))
                     }
+                }
+
+                // ── Setup: offline voice model for live tasks ─────────
+                AnimatedVisibility(
+                    visible = isAccessibilityEnabled && !voiceModelOfferDismissed &&
+                        voiceModelState !is KeywordSpotter.ModelState.Ready
+                ) {
+                    VoiceModelCard(
+                        state = voiceModelState,
+                        onDownload = viewModel::downloadVoiceModel,
+                        onDismiss = viewModel::dismissVoiceModelOffer
+                    )
                 }
 
                 // ── Overlay permission hint ───────────────────────────
@@ -387,6 +402,48 @@ fun HomeScreen(
 // ──────────────────────────────────────────────────────────────
 // Composables
 // ──────────────────────────────────────────────────────────────
+
+/** First-time setup card: download the offline voice model used by live tasks. */
+@Composable
+private fun VoiceModelCard(
+    state: KeywordSpotter.ModelState,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = AuraPrimary.copy(alpha = 0.10f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Offline voice for live tasks", fontWeight = FontWeight.SemiBold, color = AuraPrimary)
+                val detail = when (state) {
+                    is KeywordSpotter.ModelState.Downloading -> "Downloading… ${state.percent}%"
+                    is KeywordSpotter.ModelState.Failed -> "Download failed (${state.reason}). Try again on Wi-Fi."
+                    else -> "One-time download, about 36 MB (Wi-Fi recommended). Lets AURA act on words like " +
+                        "\"capture\" or \"next\" inside any app, even offline."
+                }
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                if (state !is KeywordSpotter.ModelState.Downloading) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Not now", fontSize = 12.sp) }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = onDownload,
+                            colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary)
+                        ) { Text("Download", fontSize = 12.sp) }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+}
 
 @Composable
 private fun AuraOrb(taskState: TaskState, isListening: Boolean) {

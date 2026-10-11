@@ -100,7 +100,7 @@ jobs:
           if [ -f build.log ]; then
             # GitHub keeps max 10 error annotations per step: pack 6 lines into each.
             grep -E '^e: |What went wrong|Execution failed|^> |error:|Exception|Could not|not found|Unresolved' build.log \
-              | grep -v '^[[:space:]]*at ' | awk '!seen[$0]++' | head -54 \
+              | grep -v '^[[:space:]]*at ' | grep -v '^> Task ' | awk '!seen[$0]++' | head -54 \
               | cut -c1-400 | sed 's/%/%25/g' \
               | awk '{ buf = (NR % 6 == 1) ? $0 : buf "%0A" $0 } NR % 6 == 0 { print buf; buf="" } END { if (buf != "") print buf }' \
               | while IFS= read -r chunk; do echo "::error title=Build error::${chunk}"; done
