@@ -1,12 +1,9 @@
-﻿# GitHub Copilot Instructions for AURA
+# GitHub Copilot Instructions for AURA
 
-Read `AGENTS.md` at the project root first. It is the single source of truth for:
-- Module layout and package purposes
-- Every key class and its responsibility
-- Full task data flow diagram
-- Room DB schema
-- LLM prompt structure
-- UI screens and ViewModels
-- Coding conventions and module boundaries
+Read `AGENTS.md` at the project root first. It is the index of the codebase:
+module map, task data flow, conventions, and which docs to read when.
 
-Do NOT crawl individual source files until you have read AGENTS.md.
+For per-class detail, read the `package.md` in the package you are changing
+(`android/app/src/main/java/com/aura/<package>/package.md`).
+
+Do NOT crawl individual source files or `docs/` until you have read AGENTS.md.

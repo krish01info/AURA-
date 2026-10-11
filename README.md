@@ -2,425 +2,304 @@
 
 <img src="https://img.shields.io/badge/AURA-Autonomous%20Android%20Agent-6C63FF?style=for-the-badge&logo=android&logoColor=white"/>
 
-#  AURA  Autonomous Universal Relief Agent
+# AURA — Autonomous Universal Relief Agent
 
-> **A secure, permission-gated AI agent that understands what you mean � and gets it done across any Android app.**
+> **A secure, permission-gated AI agent that understands what you mean — and gets it done across any Android app.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/Platform-Android%2010%2B-green?style=flat-square&logo=android)](https://developer.android.com)
 [![Language: Kotlin](https://img.shields.io/badge/Language-Kotlin-orange?style=flat-square&logo=kotlin)](https://kotlinlang.org)
-[![Backend: Python](https://img.shields.io/badge/Backend-Python%203.10%2B-blue?style=flat-square&logo=python)](https://python.org)
 [![Status: In Development](https://img.shields.io/badge/Status-In%20Development-yellow?style=flat-square)]()
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
-
-<br/>
 
 **Say it once. AURA handles the rest.**
 
-*Pay Rahul � Book a ride � Send a message � Set a reminder � all with a single voice command.*
+*Pay Rahul · Book a ride · Send a message · Set a reminder — all with a single voice command.*
 
 </div>
 
 ---
 
-## ?? Table of Contents
+## Contents
 
-- [What is AURA?](#-what-is-aura)
-- [Key Features](#-key-features)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Permission & Risk Engine](#-permission--risk-engine)
-- [Action Schema](#-action-schema)
-- [Task State Machine](#-task-state-machine)
-- [Security & Privacy](#-security--privacy)
-- [Enhancements & Roadmap](#-enhancements--roadmap)
-- [Developer Setup](#-developer-setup)
-- [Testing Strategy](#-testing-strategy)
-- [Contributing](#-contributing)
-- [License](#-license)
+- [What is AURA?](#what-is-aura)
+- [Features and status](#features-and-status)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [Permission and risk engine](#permission-and-risk-engine)
+- [Action schema](#action-schema)
+- [Task state machine](#task-state-machine)
+- [Security and privacy](#security-and-privacy)
+- [Developer setup](#developer-setup)
+- [Project structure](#project-structure)
+- [Docs](#docs)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## ?? What is AURA?
+## What is AURA?
 
-**AURA** is  **AI-powered Android agent** that bridges the gap between what you *say* and what your phone *does*. Instead of navigating through 5 apps to complete a task, just tell AURA:
+**AURA** is an AI-powered Android agent that bridges the gap between what you *say* and what your phone *does*. Instead of navigating through five apps to finish a task, just tell AURA:
 
 ```
-"Pay Rahul ?2,000 for dinner"
+"Pay Rahul ₹2,000 for dinner"
 "Send my team the meeting notes from Gmail"
 "Order my usual lunch from Zomato"
 ```
 
-AURA uses Android's **Accessibility Service** to observe and control any app on your device, an **LLM** to plan the steps, and a **Risk Engine** that always pauses before doing anything sensitive � keeping you 100% in control.
+AURA uses Android's **Accessibility Service** to observe and control apps on your device, an **LLM** to plan the steps, and a **risk engine** that always pauses before anything sensitive — so you stay in control.
 
-> ? **No root required. Works with any app. Your data never leaves your control.**
-
----
-
-## ? Key Features
-
-| Feature | Description |
-|---|---|
-| ?? **LLM-Powered Planning** | Understands natural language and breaks goals into precise UI actions |
-| ?? **Human-in-the-Loop** | Always pauses for your approval before sending messages, payments, or deletions |
-| ??? **Voice First** | Wake word activation (*"Hey AURA"*) + full TTS narration of actions |
-| ?? **Works Across All Apps** | Controls WhatsApp, GPay, Zomato, Gmail, Maps � any app via Accessibility API |
-| ?? **App Skill Packs** | Optimized, pre-built flows for popular Indian apps (faster & more reliable) |
-| ?? **Long-Term Memory** | Remembers your habits and preferences across sessions |
-| ?? **Offline Mode** | On-device LLM (Gemma 2B / Phi-3 Mini) for basic tasks without internet |
-| ??? **Biometric Security** | Fingerprint/face unlock gates all financial and critical actions |
-| ?? **Macro / Recipes** | Save multi-step workflows as named, reusable routines |
-| ?? **Analytics Dashboard** | See exactly how much time AURA saved you this week |
+> No root required. Works with any app.
 
 ---
 
-## ??? Architecture
+## Features and status
+
+| Feature | What it does | Status |
+|---|---|---|
+| LLM planning | Turns a goal into UI steps (Groq, with Gemini as fallback) | Built |
+| Human in the loop | Pauses for approval before messages, payments or deletions | Built |
+| Works across apps | Controls any app through the Accessibility API | Built |
+| Learned skills | Saves successful plans so repeat goals skip the LLM; RAM → disk → DB cache | Built |
+| Community skill store | Share and download skills through Supabase | Built (optional) |
+| Long-term memory | Recalls similar past tasks, fully offline | Built |
+| Voice | Wake word ("Hey AURA"), speech input, spoken narration | Built (online STT) |
+| Biometric gate | Fingerprint/face before critical actions | Built |
+| Macros | Run a named list of goals in sequence | Built |
+| Dashboard and task log | Stats and audit history | Built |
+| Self-update | Checks GitHub Releases and installs the new APK | Built |
+| Self-healing skills | Repairs skills whose success rate drops | Partly built (not wired in yet) |
+| Offline speech | Vosk on-device STT | Planned (stub) |
+| On-device LLM | Gemma / Phi-3 for offline planning | Planned |
+| Low-power wake word | Picovoice Porcupine | Planned |
+
+---
+
+## Architecture
 
 ```
-+---------------------------------------------------------+
-�                      Android Device                      �
-�                                                         �
-�  ?? Voice/Text Input                                    �
-�       �                                                 �
-�       ?                                                 �
-�  +----------+    +--------------+    +---------------+  �
-�  �   STT    �---?� Intent Parser�---?�  Task Planner �  �
-�  +----------+    �   (LLM)      �    �    (LLM)      �  �
-�                  +--------------+    +---------------+  �
-�                                             �           �
-�                                             ?           �
-�                                    +-----------------+  �
-�                                    �  Policy / Risk  �  �
-�                                    �     Engine      �  �
-�                                    +-----------------+  �
-�                                             �           �
-�                                             ?           �
-�  +--------------+    +------------+   +---------------+ �
-�  �  UI Observer �?---� Android    �?--� Action        � �
-�  �(Accessibility�    �   Apps     �   � Executor      � �
-�  �  Node Tree)  �    +------------+   +---------------+ �
-�  +--------------+                                       �
-�         �                                               �
-�         ?                                               �
-�    Task Manager / State                                 �
-�                                                         �
-�  ??  LLM API (Cloud: GPT-4, Claude, Gemini)             �
-�  ??  On-Device (Gemma 2B, Phi-3 Mini, Llama)            �
-+---------------------------------------------------------+
+ Voice / text input
+        │
+        ▼
+ TaskManager ──► PromptInjectionDefender
+        │
+        ├─► SkillRouter  (RAM → disk → Room)  ── hit ──► stored steps
+        │        miss
+        ▼
+ MemoryManager + UIObserver snapshot
+        │
+        ▼
+ GroqClient.plan  ──(on failure)──►  GeminiClient.plan
+        │
+        ▼
+ For each step:  AppPermissionManager ─► PolicyEngine (risk)
+        │             LOW / MEDIUM ─► ActionExecutor ─► Android apps
+        │             HIGH / CRITICAL ─► user approval (+ biometric) ─► ActionExecutor
+        ▼
+ MemoryManager.remember  ·  SkillLearner saves new plans
 ```
-
-### Core Components
 
 | Component | Role |
 |---|---|
-| **STT / Wake Word** | Captures voice input; *"Hey AURA"* triggers listening |
-| **Intent Parser** | LLM that converts natural language to structured goal |
-| **Task Planner** | Breaks goal into ordered action steps |
-| **Policy / Risk Engine** | Classifies each action by risk; gates confirmations |
-| **Action Executor** | Calls `AccessibilityNodeInfo.performAction()` or `dispatchGesture()` |
-| **UI Observer** | Listens to `onAccessibilityEvent` to maintain live UI state |
-| **Task Manager** | Manages state machine: Created ? Planning ? Executing ? Done |
-| **Memory Store** | SQLite + embeddings for long-term user context |
+| `TaskManager` | Orchestrates a task and its state machine |
+| `SkillRouter` / `skills/` | Finds a stored skill so the LLM call can be skipped |
+| `GroqClient` / `GeminiClient` | Plan steps from the goal, screen text and memory |
+| `PolicyEngine` | Classifies each step's risk |
+| `ActionExecutor` | Performs taps, typing, swipes via the AccessibilityService |
+| `UIObserver` | Reads the live screen (up to 2000 chars) |
+| `MemoryManager` | Offline embeddings to recall similar past tasks |
+
+Full code map for contributors and AI tools: [AGENTS.md](AGENTS.md).
 
 ---
 
-## ??? Tech Stack
+## Tech stack
 
-### Android App
-- **Language**: Kotlin (+ Java interop)
-- **UI**: Jetpack Compose
-- **Core**: Android AccessibilityService, Jetpack WorkManager, ForegroundService
-- **ML / On-Device**: TensorFlow Lite, ONNX Runtime, Google ML Kit (OCR)
-- **Storage**: Room / SQLite (encrypted), Android Keystore
+**Android app:** Kotlin, Jetpack Compose (Material 3), Hilt, Coroutines + Flow, Room, WorkManager, DataStore, Retrofit + OkHttp, kotlinx.serialization, AndroidX Biometric, AndroidX Security (EncryptedSharedPreferences).
 
-### AI & LLM — 100% Free MVP Stack
+**Cloud (optional):** Supabase — Auth (anonymous), Postgrest, Realtime.
 
-| Model | Provider | Mode | Free Tier | Speed |
-|---|---|---|---|---|
-| **Llama 3.3 70B** | **Groq** | Cloud API | 14,400 req/day FREE | 300+ tok/s |
-| **Mixtral 8x7B** | **Groq** | Cloud API | 14,400 req/day FREE | Ultra fast |
-| **Gemma 2 9B** | **Groq** | Cloud API | 14,400 req/day FREE | Fast |
-| **Gemini 1.5 Flash** | Google AI Studio | Cloud API | 1M tokens/day FREE | Fast |
-| **Gemma 2B** | Google MediaPipe | On-device | Unlimited FREE | Offline |
-| **Phi-3 Mini** | ONNX Runtime | On-device | Unlimited FREE | Offline |
+**LLMs (free tiers):**
 
-> **Groq is the #1 pick for MVP** — free, insanely fast (fastest LLM inference available), no credit card needed. Use `llama-3.3-70b-versatile` as the default model.
+| Model | Provider | Role |
+|---|---|---|
+| `llama-3.3-70b-versatile` | Groq | Default |
+| `llama-3.1-8b-instant` | Groq | Fast fallback |
+| `gemma2-9b-it` | Groq | Last Groq fallback |
+| `gemini-1.5-flash` | Google AI Studio | Fallback when Groq fails |
 
-### Speech — 100% Free
+**Speech:** Android `SpeechRecognizer` (STT and wake-word loop), Android `TextToSpeech`.
 
-| Function | Recommended | Mode | Cost |
-|---|---|---|---|
-| **STT (online)** | Android SpeechRecognizer | On-device | Free |
-| **STT (offline)** | Vosk Android Library | On-device | Free |
-| **Wake Word** | Picovoice Porcupine | On-device | Free (3 keywords) |
-| **TTS** | Android TextToSpeech | On-device | Free |
-
-### Backend (Optional) — 100% Free
-- **Framework**: Python FastAPI
-- **LLM SDK**: `groq` Python SDK (`pip install groq`) + Google `generativeai`
-- **Vector Memory**: ChromaDB (local, free, no server needed)
-- **Hosting**: Railway.app free tier or Render free tier
-- **CI/CD**: GitHub Actions (free for public repos)
-- **Crash Reporting**: Firebase Crashlytics (free tier)
-- **Testing**: JUnit, Mockito, Espresso, UI Automator, PyTest
-
-### MVP Cost Breakdown — $0/month
-
-| Service | Free Limit |
-|---|---|
-| Groq API (Llama 3.3 70B) | 14,400 requests/day |
-| Gemini 1.5 Flash | 1,000,000 tokens/day |
-| Android SpeechRecognizer | Unlimited |
-| Picovoice Porcupine | 3 wake words free |
-| Railway / Render hosting | Free tier |
-| Firebase Crashlytics | Free tier |
-| GitHub Actions CI/CD | Free for public repos |
+**CI:** GitHub Actions — debug build, unit tests, release.
 
 ---
 
-## ?? Permission & Risk Engine
+## Permission and risk engine
 
-Every action AURA plans is classified by risk level before execution:
+Every planned step is classified before it runs:
 
-| Risk Level | Example Actions | User Prompt | Behavior |
-|---|---|---|---|
-| ?? **LOW** | Open app, scroll, navigate, read text | None | Auto-execute |
-| ?? **MEDIUM** | Read messages, draft text | Informational toast | Optional confirm |
-| ?? **HIGH** | Send message, upload file, delete data | Explicit dialog | Must approve |
-| ?? **CRITICAL** | Transfer money, change password, buy item | Biometric + confirm | Secure auth required |
+| Risk | Example actions | Behaviour |
+|---|---|---|
+| **LOW** | Open app, scroll, navigate, read text | Runs automatically |
+| **MEDIUM** | Read messages, draft text | Runs automatically, logged |
+| **HIGH** | Send message, upload file, delete data | Waits for your approval |
+| **CRITICAL** | Send money, change password, buy item | Approval + biometric |
 
-**Example � Sending a WhatsApp message (HIGH risk):**
+You can also set per-app rules (always allow / always deny / always confirm) in Settings.
+
+**Example — sending a WhatsApp message (HIGH risk):**
 
 ```
-+---------------------------------+
-�     ?? SEND WHATSAPP MESSAGE    �
-�                                 �
-�  To:   Rahul Sharma             �
-�  Text: "I will arrive at 7 PM." �
-�                                 �
-�     [? Deny]    [? Allow]       �
-+---------------------------------+
-```
-
-**PolicyEngine pseudocode:**
-```kotlin
-val risk = classify(action)
-when (risk) {
-    LOW      -> execute()
-    MEDIUM   -> { log(action); execute() }
-    HIGH     -> requestConfirmation("Allow this action?") { execute() }
-    CRITICAL -> requestBiometric("Authenticate to proceed") { execute() }
-}
+┌─────────────────────────────────┐
+│     SEND WHATSAPP MESSAGE       │
+│                                 │
+│  To:   Rahul Sharma             │
+│  Text: "I will arrive at 7 PM." │
+│                                 │
+│      [ Deny ]    [ Allow ]      │
+└─────────────────────────────────┘
 ```
 
 ---
 
-## ?? Action Schema
+## Action schema
 
-AURA's planner outputs structured JSON � validated against the live UI before any execution:
+The planner returns a JSON array of steps:
 
 ```json
 [
-  { "action": "open_app",     "package": "com.whatsapp" },
+  { "action": "open_app",     "pkg": "com.whatsapp" },
   { "action": "find_element", "text": "Rahul Sharma" },
-  { "action": "tap",          "target": "first_match" },
-  { "action": "type",         "text": "I am on my way!" },
+  { "action": "tap",          "text": "Rahul Sharma" },
+  { "action": "type",         "input_text": "I am on my way!" },
   { "action": "confirm_send", "message": "Send this to Rahul?", "risk": "HIGH" }
 ]
 ```
 
-**Supported Primitives:**
-
-`open_app` � `tap` � `type` � `swipe` � `scroll` � `back` � `home` � `find_element` � `press_key` � `wait` � `request_confirmation` � `read_text` � `confirm_send`
+**Supported actions:** `open_app` · `tap` · `type` · `swipe` · `scroll` · `back` · `home` · `find_element` · `wait` · `confirm_send` · `read_text` · `press_key` · `clarify`
 
 ---
 
-## ?? Task State Machine
+## Task state machine
 
 ```
-   [Created] ? [Planning] ? [Executing] --(HIGH/CRITICAL)--? [WaitingForUser]
-                                 ?                                    �
-                                 +---------- user approves -----------+
-                                 �
-                            [Verifying]
-                           /           \
-                      [Failed]       [Completed ?]
-```
+[Created] → [Planning] → [Executing] ──(HIGH/CRITICAL)──► [WaitingForUser]
+                              ▲                                   │
+                              └────────── user approves ──────────┘
+                              │
+                         [Verifying]
+                         /         \
+                   [Failed]     [Completed]
 
-**State snapshot example:**
-```json
-{
-  "taskId": "task_1234",
-  "status": "WAITING_FOR_USER",
-  "goal": "Pay Rahul Rs.2,000 via GPay",
-  "completedSteps": ["open_app", "select_recipient", "enter_amount"],
-  "currentStep": "authentication",
-  "nextStep": "final_confirmation",
-  "riskLevel": "CRITICAL"
-}
+Any state ──(stop)──► [Cancelled]
 ```
 
 ---
 
-## ??? Security & Privacy
+## Security and privacy
 
-- **No secrets to LLM** � PINs, passwords, OTPs are never sent to any AI model
-- **Android Keystore** � All cryptographic material in hardware-backed secure enclave
-- **Biometric Gate** � `BiometricPrompt` API for CRITICAL-level actions
-- **Prompt Injection Defense** � UI content isolated from LLM instructions
-- **TLS Everywhere** � All network calls use HTTPS/TLS
-- **Encrypted Storage** � `EncryptedSharedPreferences` + encrypted SQLite
-- **Audit Logs** � Every action logged with timestamp (no sensitive data)
-- **Emergency Stop** � "Stop AURA" button + *"Hey AURA, stop"* halts all execution instantly
-- **Least Privilege** � Only `BIND_ACCESSIBILITY_SERVICE`, `RECORD_AUDIO`, `INTERNET`
+- **Risk gating** — HIGH steps need approval; CRITICAL steps need biometric auth (`BiometricPrompt`).
+- **Prompt-injection defence** — the goal is sanitized, and screen text is fenced off from instructions in the prompt.
+- **Encrypted API keys** — stored with `EncryptedSharedPreferences` (AES-256-GCM, Android Keystore).
+- **TLS** — all network calls use HTTPS.
+- **Audit log** — every auto-run, approved or denied step is recorded.
+- **Emergency stop** — the STOP button, or say *"Hey AURA, stop"*.
+- **Planned:** encrypting the Room database.
 
----
-
-## ?? Enhancements & Roadmap
-
-### Planned Features
-
-| Feature | Description | Priority |
-|---|---|---|
-| ?? **Long-Term Memory** | Vector store remembers past actions & preferences | **P0** |
-| ??? **App Skill Packs** | Pre-optimized flows for WhatsApp, GPay, Zomato, etc. | **P0** |
-| ?? **Floating Bubble** | Persistent overlay � always reachable, never intrusive | **P1** |
-| ?? **Wake Word** | Hands-free on-device keyword detection (Porcupine) | **P1** |
-| ?? **Macro / Recipe System** | Save & replay named multi-step workflows | **P1** |
-| ?? **Context Awareness** | Time, location, calendar-aware planning | **P2** |
-| ?? **Multi-Agent Architecture** | Orchestrator + domain-specialist sub-agents | **P2** |
-| ??? **Multimodal Input** | Act on shared images ("Book this restaurant") | **P2** |
-| ?? **Analytics Dashboard** | "AURA saved you 47 minutes this week" | **P3** |
-
-### Timeline
-```
-2026 Q4 -------------------------------------- 2027 Q2
-
-Phase 1 ���� Core Agent MVP
-Phase 2      ���� Voice & UX + Floating Bubble
-Phase 3           ���� Memory + Context Awareness
-Phase 4                ���� App Skill Packs
-Phase 5                     ���� Advanced Security
-Phase 6                          �������� Recipes � Multi-Agent � Dashboard
-```
+Permissions used: Accessibility service, microphone, overlay (floating bubble), notifications, foreground service, start on boot, biometric, internet, and install packages (for self-update).
 
 ---
 
-## ?? Developer Setup
+## Developer setup
 
-### Prerequisites
-- Android Studio Hedgehog or later
-- JDK 11+, Kotlin 1.9+
-- Android device or emulator (API 29 / Android 10+)
-- *(Optional)* Python 3.10+ for backend
-
-### Quick Start
+**Prerequisites:** Android Studio (recent), JDK 17, an Android 10+ (API 29) device or emulator.
 
 ```bash
-# 1. Clone the repo
+# 1. Clone
 git clone https://github.com/krish01info/AURA-.git
 cd AURA-
 
-# 2. Open android/ in Android Studio, build & run
+# 2. Add keys: copy the values from .env.example into android/local.properties
+#    GROQ_API_KEY is required; GEMINI_API_KEY and SUPABASE_* are optional.
 
-# 3. Enable the agent on your device:
-#    Settings ? Accessibility ? AURA ? Use Service ?
+# 3. Build and run
+cd android
+./gradlew assembleDebug        # or open android/ in Android Studio
+./gradlew testDebugUnitTest    # unit tests
 
-# 4. (Optional) Start the backend
-cd agent-backend
-pip install -r requirements.txt
-cp .env.example .env   # Add your LLM API keys
-uvicorn main:app --reload
+# 4. On the device: Settings → Accessibility → AURA → turn on
 ```
 
-### Project Structure
+---
+
+## Project structure
 
 ```
 AURA-/
-+-- android/                  # Android app (Kotlin)
-�   +-- app/src/
-�       +-- accessibility/    # AURAAccessibilityService.kt
-�       +-- agent/            # Planner, PolicyEngine, ActionExecutor
-�       +-- memory/           # Long-term memory store
-�       +-- ui/               # Jetpack Compose UI + overlay bubble
-�       +-- skills/           # App-specific skill packs (JSON)
-+-- agent-backend/            # Optional LLM backend (Python FastAPI)
-�   +-- main.py
-�   +-- planner.py
-�   +-- requirements.txt
-+-- docs/
-�   +-- architecture.md
-�   +-- security.md
-�   +-- contributing.md
-+-- tests/
-�   +-- android-tests/        # Espresso + UI Automator
-�   +-- backend-tests/        # PyTest
-+-- deep-research-report.md   # Full technical research & design doc
-+-- .github/workflows/        # CI/CD (GitHub Actions)
-+-- README.md
-+-- LICENSE
-+-- CONTRIBUTING.md
+├── android/                     Android app (single module)
+│   └── app/src/main/java/com/aura/
+│       ├── accessibility/       Screen reading, node finding
+│       ├── agent/               Task lifecycle (TaskManager, ActionExecutor, SkillRouter)
+│       ├── cloud/               Supabase auth + skill store client
+│       ├── data/                Room DB (db/) and data classes (model/)
+│       ├── di/                  Hilt modules
+│       ├── llm/                 Groq + Gemini clients
+│       ├── macros/              Macro runner
+│       ├── memory/              Offline memory + embeddings
+│       ├── policy/              Risk engine, app rules, audit, biometric
+│       ├── skills/              Skill caches, learning, health
+│       ├── ui/                  Compose screens + ViewModels
+│       ├── update/              Self-update from GitHub Releases
+│       └── voice/               STT/TTS, wake word, floating bubble
+├── docs/
+│   ├── design/                  SKILL-SYSTEM.md
+│   ├── plans/                   implementation-plan.md, MVP.md, roadmap.md
+│   └── research/                deep-research-report.md
+├── .github/workflows/           CI and release
+├── AGENTS.md                    Code map for contributors and AI tools
+├── CLAUDE.md                    Points Claude Code at AGENTS.md
+├── CHANGELOG.md
+└── LICENSE
 ```
+
+Each package folder has a short `package.md` describing its files.
 
 ---
 
-## ?? Testing Strategy
+## Docs
 
-| Level | Tools | Coverage |
-|---|---|---|
-| **Unit** | JUnit 5, Mockito, PyTest | Planning logic, policy engine, state machine |
-| **Integration** | Espresso, UI Automator | Cross-app flows on emulator |
-| **Voice** | Pre-recorded audio samples | STT accuracy, intent parsing |
-| **Security** | OWASP ZAP, Android Lint | API surface, accessibility permissions |
-| **Fuzzing** | Android Monkey, custom prompt fuzzer | Random inputs, prompt injection attempts |
-
-**Sample log output:**
-```
-10:05:32 [TASK]   Task #42 started: "Send WhatsApp message to Rahul"
-10:05:32 [ACTION] Opened com.whatsapp
-10:05:33 [ACTION] Found contact: Rahul Sharma
-10:05:33 [ACTION] Typed message: "Hello Rahul"
-10:05:33 [PROMPT] Awaiting user approval � HIGH risk action
-10:05:45 [USER]   Approved
-10:05:45 [ACTION] Message sent successfully
-10:05:45 [TASK]   Task #42 completed in 13s
-```
+| Doc | What's in it |
+|---|---|
+| [AGENTS.md](AGENTS.md) | Code map, data flow, conventions — start here |
+| [docs/design/SKILL-SYSTEM.md](docs/design/SKILL-SYSTEM.md) | Skill system design |
+| [docs/plans/implementation-plan.md](docs/plans/implementation-plan.md) | Phase-by-phase build plan |
+| [docs/plans/MVP.md](docs/plans/MVP.md) | MVP scope |
+| [docs/plans/roadmap.md](docs/plans/roadmap.md) | Deferred work (Supabase Realtime, pgvector) |
+| [docs/research/deep-research-report.md](docs/research/deep-research-report.md) | Background research |
 
 ---
 
-## ?? Contributing
+## Contributing
 
-Contributions are very welcome!
+Contributions are welcome.
 
-1. **Fork** this repository
-2. **Create** a feature branch: `git checkout -b feature/your-feature`
-3. **Write tests** for any new behavior
-4. **Submit** a Pull Request
+1. Fork the repo and create a branch: `git checkout -b feature/your-feature`
+2. Read [AGENTS.md](AGENTS.md) and the `package.md` of the package you're changing
+3. Add tests for new behaviour, and update the `package.md` if you add or rename classes
+4. Open a pull request
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
-
-**High-priority contributions needed:**
-- App skill packs for popular Indian apps
-- On-device LLM integration (Llama / Gemma via TFLite)
-- Multi-language support (Hindi, Tamil, Bengali)
-- UI Automator test coverage
+**Most wanted:** skills for popular Indian apps, unit tests (`policy/`, `agent/`, `skills/`), on-device LLM, Hindi/Tamil/Bengali support.
 
 ---
 
-## ?? License
+## License
 
-Licensed under the **Apache License 2.0** � see [LICENSE](LICENSE) for details.
-
-Apache 2.0 was chosen for its permissive terms and explicit **patent grant**, making AURA safe for both open-source and commercial use.
+Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE). Apache 2.0 was chosen for its permissive terms and explicit patent grant, so AURA is safe for both open-source and commercial use.
 
 ---
 
 <div align="center">
 
-**Built with ?? for the future of mobile AI**
-
-*AURA � Make mobile automation as easy as talking to a helpful assistant, without sacrificing control or security.*
-
-? **Star this repo** if you believe AI should work *for* you, not just *with* you.
+*AURA — make mobile automation as easy as talking to a helpful assistant, without giving up control or security.*
 
 </div>
