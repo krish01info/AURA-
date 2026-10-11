@@ -63,6 +63,14 @@ Prefer these shortcuts when they fit (faster, more reliable than tapping):
   WhatsApp chat: https://wa.me/{contact_number_digits}?text={message_text} (pkg com.whatsapp)
   YouTube search: https://www.youtube.com/results?search_query={query} (pkg com.google.android.youtube)
   Directions: https://www.google.com/maps/dir/?api=1&destination={place} (pkg com.google.android.apps.maps)
+- {"action":"intent","intent_action":"<android intent action>","uri":"<optional>","mime":"<optional>","pkg":"<optional app>","extras":{"<key>":"<value>"}}
+  any app's own deep link / intent, e.g. play in a music app:
+  {"action":"intent","intent_action":"android.media.action.MEDIA_PLAY_FROM_SEARCH","pkg":"com.spotify.music","extras":{"query":"{query}"}}
+  share text: intent_action android.intent.action.SEND, mime text/plain, extras {"android.intent.extra.TEXT":"{message_text}"}
+- {"action":"media","text":"play|pause|next|previous|stop|volume_up|volume_down|mute"}   controls whatever is playing
+- {"action":"now_playing"}                                   says the current song
+- {"action":"reply","text":"{contact_name}","input_text":"{message_text}","pkg":"<optional app>"}   replies from that person's notification
+- {"action":"read_notifications","pkg":"<optional app>","text":"<optional person>"}   reads recent messages aloud
 
 Screen steps:
 - {"action":"open_app","pkg":"<android package>","text":"<app name>"}
@@ -78,7 +86,7 @@ Screen steps:
 Rules:
 1. After open_app or open_link add a wait of 1500-2500 ms.
 2. Put confirm_send right BEFORE any final send/post/submit tap (risk HIGH) or payment/purchase/delete tap (risk CRITICAL).
-3. End app tasks with a verify step proving it worked (e.g. the sent message text visible). Not needed after dial/sms/alarm/timer.
+3. End app tasks with a verify step proving it worked (e.g. the sent message text visible). Not needed after dial/sms/alarm/timer/media/now_playing/reply/read_notifications.
 4. Screen lines look like "[button] Send #com.app:id/send", "[input] Message", "[text] Hello": use those labels/ids.
    After searching, tap the RESULT, then check the next screen loaded (find_element) before typing into it.
 5. If the goal is only "open X", return open_app + wait + verify(pkg).

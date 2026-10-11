@@ -1,0 +1,1264 @@
+{
+ "version": 1,
+ "note": "AURA app shortcuts. Each entry becomes a built-in skill (no LLM, no screen tapping where possible). Edit and bump 'version'; phones fetch this file daily from GitHub. Step keys: see data/model/ActionStep.kt.",
+ "skills": [
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "send_message",
+   "name": "WhatsApp: send message",
+   "risk": "HIGH",
+   "description": "Send a WhatsApp message (direct chat link; needs Contacts)",
+   "patterns": [
+    "send {message_text} to {contact_name} on whatsapp",
+    "send a whatsapp message to {contact_name} saying {message_text}",
+    "send whatsapp to {contact_name} saying {message_text}",
+    "message {contact_name} on whatsapp saying {message_text}",
+    "message {contact_name} on whatsapp {message_text}",
+    "tell {contact_name} on whatsapp {message_text}",
+    "whatsapp {contact_name} saying {message_text}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.whatsapp",
+     "uri": "https://wa.me/{contact_number_digits}?text={message_text}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2500
+    },
+    {
+     "action": "find_element",
+     "viewId": "com.whatsapp:id/entry"
+    },
+    {
+     "action": "confirm_send",
+     "message": "Send \"{message_text}\" to {contact_name} on WhatsApp?",
+     "risk": "HIGH"
+    },
+    {
+     "action": "tap",
+     "viewId": "com.whatsapp:id/send",
+     "text": "Send"
+    },
+    {
+     "action": "verify",
+     "pkg": "com.whatsapp",
+     "text": "{message_text}"
+    }
+   ]
+  },
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "send_message_search",
+   "name": "WhatsApp: send message (search)",
+   "risk": "HIGH",
+   "description": "Send a WhatsApp message by searching the contact (no Contacts permission)",
+   "patterns": [
+    "send {message_text} to {contact_name} on whatsapp",
+    "send a whatsapp message to {contact_name} saying {message_text}",
+    "message {contact_name} on whatsapp saying {message_text}",
+    "message {contact_name} on whatsapp {message_text}",
+    "tell {contact_name} on whatsapp {message_text}"
+   ],
+   "steps": [
+    {
+     "action": "open_app",
+     "pkg": "com.whatsapp",
+     "text": "WhatsApp"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "tap",
+     "viewId": "com.whatsapp:id/menuitem_search",
+     "text": "Search"
+    },
+    {
+     "action": "type",
+     "input_text": "{contact_name}",
+     "text": "Search"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 1500
+    },
+    {
+     "action": "tap",
+     "text": "{contact_name}"
+    },
+    {
+     "action": "find_element",
+     "viewId": "com.whatsapp:id/entry"
+    },
+    {
+     "action": "type",
+     "input_text": "{message_text}",
+     "viewId": "com.whatsapp:id/entry"
+    },
+    {
+     "action": "confirm_send",
+     "message": "Send \"{message_text}\" to {contact_name} on WhatsApp?",
+     "risk": "HIGH"
+    },
+    {
+     "action": "tap",
+     "viewId": "com.whatsapp:id/send"
+    },
+    {
+     "action": "verify",
+     "pkg": "com.whatsapp",
+     "text": "{message_text}"
+    }
+   ]
+  },
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "open_chat",
+   "name": "WhatsApp: open chat",
+   "risk": "LOW",
+   "description": "WhatsApp: open chat",
+   "patterns": [
+    "open {contact_name} chat on whatsapp",
+    "open whatsapp chat with {contact_name}",
+    "open chat with {contact_name} on whatsapp"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.whatsapp",
+     "uri": "https://wa.me/{contact_number_digits}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2500
+    },
+    {
+     "action": "verify",
+     "pkg": "com.whatsapp"
+    }
+   ]
+  },
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "share_text",
+   "name": "WhatsApp: share text",
+   "risk": "MEDIUM",
+   "description": "Open WhatsApp's share picker with the text",
+   "patterns": [
+    "share {text_content} on whatsapp",
+    "forward {text_content} on whatsapp"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.SEND",
+     "mime": "text/plain",
+     "pkg": "com.whatsapp",
+     "extras": {
+      "android.intent.extra.TEXT": "{text_content}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "com.aura.notifications",
+   "category": "messaging",
+   "action": "reply_notification",
+   "name": "Reply from notification",
+   "risk": "HIGH",
+   "description": "Reply to a message from its notification (needs notification access)",
+   "patterns": [
+    "reply to {contact_name} saying {message_text}",
+    "reply {message_text} to {contact_name}",
+    "send a reply to {contact_name} saying {message_text}"
+   ],
+   "steps": [
+    {
+     "action": "confirm_send",
+     "message": "Reply \"{message_text}\" to {contact_name}?",
+     "risk": "HIGH"
+    },
+    {
+     "action": "reply",
+     "text": "{contact_name}",
+     "input_text": "{message_text}"
+    }
+   ]
+  },
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "reply_notification",
+   "name": "WhatsApp: reply from notification",
+   "risk": "HIGH",
+   "description": "WhatsApp: reply from notification",
+   "patterns": [
+    "reply to {contact_name} on whatsapp saying {message_text}",
+    "reply on whatsapp to {contact_name} saying {message_text}"
+   ],
+   "steps": [
+    {
+     "action": "confirm_send",
+     "message": "Reply \"{message_text}\" to {contact_name} on WhatsApp?",
+     "risk": "HIGH"
+    },
+    {
+     "action": "reply",
+     "pkg": "com.whatsapp",
+     "text": "{contact_name}",
+     "input_text": "{message_text}"
+    }
+   ]
+  },
+  {
+   "app": "com.aura.notifications",
+   "category": "messaging",
+   "action": "read_messages",
+   "name": "Read new messages",
+   "risk": "LOW",
+   "description": "Read recent notifications aloud (needs notification access)",
+   "patterns": [
+    "read my messages",
+    "read my notifications",
+    "any new messages",
+    "do i have any messages",
+    "read new messages"
+   ],
+   "steps": [
+    {
+     "action": "read_notifications"
+    }
+   ]
+  },
+  {
+   "app": "com.whatsapp",
+   "category": "messaging",
+   "action": "read_messages",
+   "name": "WhatsApp: read messages",
+   "risk": "LOW",
+   "description": "WhatsApp: read messages",
+   "patterns": [
+    "read my whatsapp messages",
+    "any new whatsapp messages",
+    "read whatsapp messages"
+   ],
+   "steps": [
+    {
+     "action": "read_notifications",
+     "pkg": "com.whatsapp"
+    }
+   ]
+  },
+  {
+   "app": "com.aura.notifications",
+   "category": "messaging",
+   "action": "read_from_contact",
+   "name": "Read messages from someone",
+   "risk": "LOW",
+   "description": "Read messages from someone",
+   "patterns": [
+    "any messages from {contact_name}",
+    "read messages from {contact_name}",
+    "what did {contact_name} say"
+   ],
+   "steps": [
+    {
+     "action": "read_notifications",
+     "text": "{contact_name}"
+    }
+   ]
+  },
+  {
+   "app": "com.android.dialer",
+   "category": "calling",
+   "action": "call_contact",
+   "name": "Phone: call",
+   "risk": "LOW",
+   "description": "Open the dialer with a contact's number",
+   "patterns": [
+    "call {contact_name}",
+    "phone {contact_name}",
+    "dial {contact_name}",
+    "make a call to {contact_name}",
+    "ring {contact_name}"
+   ],
+   "steps": [
+    {
+     "action": "dial",
+     "number": "{contact_number}"
+    }
+   ]
+  },
+  {
+   "app": "com.android.mms",
+   "category": "messaging",
+   "action": "send_sms",
+   "name": "SMS: text",
+   "risk": "LOW",
+   "description": "Open an SMS with the message typed",
+   "patterns": [
+    "text {contact_name} saying {message_text}",
+    "sms {contact_name} saying {message_text}",
+    "send an sms to {contact_name} saying {message_text}",
+    "send a text to {contact_name} saying {message_text}"
+   ],
+   "steps": [
+    {
+     "action": "sms",
+     "number": "{contact_number}",
+     "input_text": "{message_text}"
+    }
+   ]
+  },
+  {
+   "app": "org.telegram.messenger",
+   "category": "messaging",
+   "action": "open_user",
+   "name": "Telegram: open user",
+   "risk": "LOW",
+   "description": "Telegram: open user",
+   "patterns": [
+    "open {username} on telegram",
+    "telegram {username}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "org.telegram.messenger",
+     "uri": "https://t.me/{username}"
+    }
+   ]
+  },
+  {
+   "app": "com.instagram.android",
+   "category": "social",
+   "action": "open_profile",
+   "name": "Instagram: open profile",
+   "risk": "LOW",
+   "description": "Instagram: open profile",
+   "patterns": [
+    "open {username} on instagram",
+    "show {username} on instagram",
+    "open instagram profile of {username}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.instagram.android",
+     "uri": "https://instagram.com/_u/{username}"
+    }
+   ]
+  },
+  {
+   "app": "com.twitter.android",
+   "category": "social",
+   "action": "open_profile",
+   "name": "X / Twitter: open profile",
+   "risk": "LOW",
+   "description": "X / Twitter: open profile",
+   "patterns": [
+    "open {username} on twitter",
+    "open {username} on x"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.twitter.android",
+     "uri": "https://twitter.com/{username}"
+    }
+   ]
+  },
+  {
+   "app": "com.spotify.music",
+   "category": "media",
+   "action": "play_search",
+   "name": "Spotify: play",
+   "risk": "LOW",
+   "description": "Start playing in Spotify directly",
+   "patterns": [
+    "play {query} on spotify",
+    "play some {query} on spotify",
+    "put on {query} on spotify"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+     "pkg": "com.spotify.music",
+     "extras": {
+      "query": "{query}",
+      "android.intent.extra.focus": "vnd.android.cursor.item/*"
+     }
+    }
+   ]
+  },
+  {
+   "app": "com.spotify.music",
+   "category": "media",
+   "action": "search",
+   "name": "Spotify: search",
+   "risk": "LOW",
+   "description": "Spotify: search",
+   "patterns": [
+    "search {query} on spotify",
+    "find {query} on spotify"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.spotify.music",
+     "uri": "https://open.spotify.com/search/{query}"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.youtube.music",
+   "category": "media",
+   "action": "play_search",
+   "name": "YouTube Music: play",
+   "risk": "LOW",
+   "description": "YouTube Music: play",
+   "patterns": [
+    "play {query} on youtube music",
+    "play some {query} on youtube music"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+     "pkg": "com.google.android.apps.youtube.music",
+     "extras": {
+      "query": "{query}",
+      "android.intent.extra.focus": "vnd.android.cursor.item/*"
+     }
+    }
+   ]
+  },
+  {
+   "app": "com.jio.media.jiobeats",
+   "category": "media",
+   "action": "play_search",
+   "name": "JioSaavn: play",
+   "risk": "LOW",
+   "description": "JioSaavn: play",
+   "patterns": [
+    "play {query} on jiosaavn",
+    "play {query} on saavn"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+     "pkg": "com.jio.media.jiobeats",
+     "extras": {
+      "query": "{query}",
+      "android.intent.extra.focus": "vnd.android.cursor.item/*"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "play_search",
+   "name": "Play music",
+   "risk": "LOW",
+   "description": "Play in your default music app",
+   "patterns": [
+    "play {query}",
+    "play the song {query}",
+    "play some {query}",
+    "put on some {query}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+     "extras": {
+      "query": "{query}",
+      "android.intent.extra.focus": "vnd.android.cursor.item/*"
+     }
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.youtube",
+   "category": "media",
+   "action": "search_play",
+   "name": "YouTube: search",
+   "risk": "LOW",
+   "description": "YouTube: search",
+   "patterns": [
+    "play {search_query} on youtube",
+    "search {search_query} on youtube",
+    "search youtube for {search_query}",
+    "find {search_query} on youtube",
+    "open youtube and search {search_query}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.youtube",
+     "uri": "https://www.youtube.com/results?search_query={search_query}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.youtube"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "media_pause",
+   "name": "Media: pause",
+   "risk": "LOW",
+   "description": "Media: pause",
+   "patterns": [
+    "pause",
+    "pause music",
+    "pause the music",
+    "pause the song",
+    "stop the music",
+    "stop music"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "pause"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "media_play",
+   "name": "Media: play",
+   "risk": "LOW",
+   "description": "Media: play",
+   "patterns": [
+    "resume",
+    "resume music",
+    "play music",
+    "continue playing",
+    "resume the song",
+    "play the music"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "play"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "media_next",
+   "name": "Media: next",
+   "risk": "LOW",
+   "description": "Media: next",
+   "patterns": [
+    "next song",
+    "skip song",
+    "next track",
+    "skip this song",
+    "play next song",
+    "skip"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "next"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "media_previous",
+   "name": "Media: previous",
+   "risk": "LOW",
+   "description": "Media: previous",
+   "patterns": [
+    "previous song",
+    "last song",
+    "previous track",
+    "play previous song",
+    "go back a song"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "previous"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "volume_up",
+   "name": "Media: volume up",
+   "risk": "LOW",
+   "description": "Media: volume up",
+   "patterns": [
+    "volume up",
+    "louder",
+    "increase volume",
+    "turn it up",
+    "turn up the volume"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "volume_up"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "volume_down",
+   "name": "Media: volume down",
+   "risk": "LOW",
+   "description": "Media: volume down",
+   "patterns": [
+    "volume down",
+    "quieter",
+    "decrease volume",
+    "turn it down",
+    "turn down the volume",
+    "lower the volume"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "volume_down"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "mute",
+   "name": "Media: mute",
+   "risk": "LOW",
+   "description": "Media: mute",
+   "patterns": [
+    "mute",
+    "mute the sound",
+    "mute volume"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "mute"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
+   "action": "now_playing",
+   "name": "What's playing",
+   "risk": "LOW",
+   "description": "Say the current song (needs notification access)",
+   "patterns": [
+    "what's playing",
+    "whats playing",
+    "what is playing",
+    "what song is this",
+    "which song is playing",
+    "what song is playing"
+   ],
+   "steps": [
+    {
+     "action": "now_playing"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "navigate_to",
+   "name": "Maps: directions",
+   "risk": "LOW",
+   "description": "Maps: directions",
+   "patterns": [
+    "navigate to {destination}",
+    "take me to {destination}",
+    "directions to {destination}",
+    "show route to {destination}",
+    "how do i get to {destination}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/dir/?api=1&destination={destination}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "search_place",
+   "name": "Maps: find place",
+   "risk": "LOW",
+   "description": "Maps: find place",
+   "patterns": [
+    "show {place} on the map",
+    "find {place} on maps",
+    "where is {place}",
+    "search {place} on maps"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/search/?api=1&query={place}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.ubercab",
+   "category": "travel",
+   "action": "book_ride",
+   "name": "Uber: ride to",
+   "risk": "MEDIUM",
+   "description": "Open Uber with the destination filled in (you confirm the ride)",
+   "patterns": [
+    "book an uber to {place}",
+    "get me an uber to {place}",
+    "uber to {place}",
+    "book a cab to {place} on uber"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.ubercab",
+     "uri": "https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]={place}"
+    }
+   ]
+  },
+  {
+   "app": "in.amazon.mShop.android.shopping",
+   "category": "shopping",
+   "action": "search",
+   "name": "Amazon: search",
+   "risk": "LOW",
+   "description": "Amazon: search",
+   "patterns": [
+    "search {query} on amazon",
+    "find {query} on amazon",
+    "look for {query} on amazon",
+    "buy {query} on amazon"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "in.amazon.mShop.android.shopping",
+     "uri": "https://www.amazon.in/s?k={query}"
+    }
+   ]
+  },
+  {
+   "app": "com.flipkart.android",
+   "category": "shopping",
+   "action": "search",
+   "name": "Flipkart: search",
+   "risk": "LOW",
+   "description": "Flipkart: search",
+   "patterns": [
+    "search {query} on flipkart",
+    "find {query} on flipkart",
+    "buy {query} on flipkart"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.flipkart.android",
+     "uri": "https://www.flipkart.com/search?q={query}"
+    }
+   ]
+  },
+  {
+   "app": "com.android.vending",
+   "category": "apps",
+   "action": "search",
+   "name": "Play Store: find app",
+   "risk": "LOW",
+   "description": "Search the Play Store (you tap Install)",
+   "patterns": [
+    "find {query} on play store",
+    "install {query}",
+    "search play store for {query}",
+    "download {query} app"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.android.vending",
+     "uri": "market://search?q={query}&c=apps"
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "search",
+   "name": "Web search",
+   "risk": "LOW",
+   "description": "Web search",
+   "patterns": [
+    "search google for {query}",
+    "google {query}",
+    "search the web for {query}",
+    "look up {query} on google"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "{query}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "open_site",
+   "name": "Open website",
+   "risk": "LOW",
+   "description": "Open website",
+   "patterns": [
+    "open website {site}",
+    "go to website {site}",
+    "open the website {site}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "uri": "https://{site}"
+    }
+   ]
+  },
+  {
+   "app": "android.email",
+   "category": "email",
+   "action": "compose",
+   "name": "Email: new",
+   "risk": "LOW",
+   "description": "Email: new",
+   "patterns": [
+    "write an email",
+    "compose an email",
+    "new email",
+    "send an email"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.SENDTO",
+     "uri": "mailto:"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.gm",
+   "category": "email",
+   "action": "read_inbox",
+   "name": "Gmail: open inbox",
+   "risk": "LOW",
+   "description": "Gmail: open inbox",
+   "patterns": [
+    "open gmail",
+    "open my inbox",
+    "check my email",
+    "check my mail",
+    "open my email"
+   ],
+   "steps": [
+    {
+     "action": "open_app",
+     "pkg": "com.google.android.gm",
+     "text": "Gmail"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 1500
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.gm"
+    }
+   ]
+  },
+  {
+   "app": "android.calendar",
+   "category": "calendar",
+   "action": "add_event",
+   "name": "Calendar: add event",
+   "risk": "LOW",
+   "description": "Open a new calendar event with the title filled in",
+   "patterns": [
+    "add {title} to my calendar",
+    "create an event called {title}",
+    "add an event called {title}",
+    "put {title} in my calendar"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.INSERT",
+     "uri": "content://com.android.calendar/events",
+     "extras": {
+      "title": "{title}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "com.android.deskclock",
+   "category": "clock",
+   "action": "set_alarm",
+   "name": "Clock: alarm",
+   "risk": "LOW",
+   "description": "Clock: alarm",
+   "patterns": [
+    "set an alarm for {time}",
+    "set alarm for {time}",
+    "wake me up at {time}",
+    "alarm at {time}",
+    "set an alarm at {time}"
+   ],
+   "steps": [
+    {
+     "action": "alarm",
+     "time": "{time}",
+     "message": "AURA"
+    }
+   ]
+  },
+  {
+   "app": "com.android.deskclock",
+   "category": "clock",
+   "action": "set_timer",
+   "name": "Clock: timer",
+   "risk": "LOW",
+   "description": "Clock: timer",
+   "patterns": [
+    "set a timer for {time}",
+    "set timer for {time}",
+    "start a timer for {time}",
+    "timer for {time}",
+    "remind me in {time}"
+   ],
+   "steps": [
+    {
+     "action": "timer",
+     "time": "{time}",
+     "message": "AURA"
+    }
+   ]
+  },
+  {
+   "app": "android.camera",
+   "category": "camera",
+   "action": "photo",
+   "name": "Camera: photo",
+   "risk": "LOW",
+   "description": "Camera: photo",
+   "patterns": [
+    "take a photo",
+    "take a picture",
+    "open the camera",
+    "open camera",
+    "take a selfie"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.STILL_IMAGE_CAMERA"
+    }
+   ]
+  },
+  {
+   "app": "android.camera",
+   "category": "camera",
+   "action": "video",
+   "name": "Camera: video",
+   "risk": "LOW",
+   "description": "Camera: video",
+   "patterns": [
+    "record a video",
+    "take a video",
+    "start recording video"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.VIDEO_CAMERA"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "wifi",
+   "name": "Settings: wifi",
+   "risk": "LOW",
+   "description": "Settings: wifi",
+   "patterns": [
+    "open wifi settings",
+    "wifi settings",
+    "turn on wifi",
+    "turn off wifi",
+    "connect to wifi"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.panel.action.WIFI"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "bluetooth",
+   "name": "Settings: bluetooth",
+   "risk": "LOW",
+   "description": "Settings: bluetooth",
+   "patterns": [
+    "open bluetooth settings",
+    "bluetooth settings",
+    "turn on bluetooth",
+    "turn off bluetooth"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.BLUETOOTH_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "internet",
+   "name": "Settings: internet",
+   "risk": "LOW",
+   "description": "Settings: internet",
+   "patterns": [
+    "mobile data settings",
+    "turn on mobile data",
+    "turn off mobile data",
+    "internet settings"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.panel.action.INTERNET_CONNECTIVITY"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "volume_panel",
+   "name": "Settings: volume panel",
+   "risk": "LOW",
+   "description": "Settings: volume panel",
+   "patterns": [
+    "volume settings",
+    "sound settings",
+    "open volume settings"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.panel.action.VOLUME"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "display",
+   "name": "Settings: display",
+   "risk": "LOW",
+   "description": "Settings: display",
+   "patterns": [
+    "brightness settings",
+    "display settings",
+    "change brightness"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.DISPLAY_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "location",
+   "name": "Settings: location",
+   "risk": "LOW",
+   "description": "Settings: location",
+   "patterns": [
+    "location settings",
+    "turn on location",
+    "turn off location",
+    "turn on gps"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.LOCATION_SOURCE_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "battery",
+   "name": "Settings: battery",
+   "risk": "LOW",
+   "description": "Settings: battery",
+   "patterns": [
+    "battery usage",
+    "battery settings",
+    "what is using my battery"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.POWER_USAGE_SUMMARY"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "all",
+   "name": "Settings: all",
+   "risk": "LOW",
+   "description": "Settings: all",
+   "patterns": [
+    "open settings",
+    "open phone settings"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.application.zomato",
+   "category": "food",
+   "action": "reorder_last",
+   "name": "Zomato: reorder last order",
+   "risk": "HIGH",
+   "description": "Zomato: reorder last order",
+   "patterns": [
+    "reorder my last zomato order",
+    "reorder on zomato",
+    "order my usual from zomato"
+   ],
+   "steps": [
+    {
+     "action": "open_app",
+     "pkg": "com.application.zomato",
+     "text": "Zomato"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2500
+    },
+    {
+     "action": "tap",
+     "text": "Orders"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 1500
+    },
+    {
+     "action": "find_element",
+     "text": "Reorder"
+    },
+    {
+     "action": "confirm_send",
+     "message": "Reorder your last Zomato order?",
+     "risk": "HIGH"
+    },
+    {
+     "action": "tap",
+     "text": "Reorder"
+    },
+    {
+     "action": "verify",
+     "pkg": "com.application.zomato"
+    }
+   ]
+  },
+  {
+   "app": "android.upi",
+   "category": "payment",
+   "action": "pay_upi",
+   "name": "UPI: pay",
+   "risk": "HIGH",
+   "description": "Open a UPI app with payee and amount filled in; you confirm with your PIN",
+   "patterns": [
+    "pay {amount} rupees to {upi_id}",
+    "pay {amount} to {upi_id}",
+    "send {amount} rupees to {upi_id}"
+   ],
+   "steps": [
+    {
+     "action": "confirm_send",
+     "message": "Open your UPI app to pay ₹{amount} to {upi_id}? (You'll enter your PIN there.)",
+     "risk": "HIGH"
+    },
+    {
+     "action": "open_link",
+     "uri": "upi://pay?pa={upi_id}&pn={upi_id}&am={amount}&cu=INR"
+    }
+   ]
+  }
+ ]
+}

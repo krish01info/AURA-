@@ -18,6 +18,10 @@ Read it, then only the `package.md` of the package you're changing.
 - ✅ Skills (DB v7): one row per **variant** (task × skin × Android group × app major version);
   stored skills run with **no LLM call** via phrase patterns; lookup RAM → disk → Room → cloud → LLM creates.
   See `android/app/src/main/java/com/aura/skills/package.md`.
+- ✅ App shortcuts (2026-10-11): built-in skills live in `android/app/src/main/assets/app_shortcuts.json`
+  (53 skills, 30+ apps, intents/links/media keys); phones re-download it from `main` daily.
+  **Add/fix an app: edit the JSON, bump `version`, merge** — `AppShortcutsTest` validates it in CI.
+  New actions `intent` (allow-list), `media`, `now_playing`, `reply`, `read_notifications` (notification access, optional).
 - ⚠️ Voice rewrite and skill system are **not yet verified on a real phone**. Ask the owner for results/logcat before assuming they work.
 - ⚠️ Cloud (Supabase) isn't configured yet; when it is, run `docs/cloud/supabase_skill_packs.sql` first.
 
@@ -54,6 +58,8 @@ Read it, then only the `package.md` of the package you're changing.
 - Only one SpeechRecognizer at a time — all listening goes through `WakeWordService`.
 - Groq/Gemini retire models; CI warns when a `GroqClient.MODEL_CASCADE` model disappears.
 - The planner prompt (`llm/PlannerPrompt.SYSTEM`) must list the exact `ActionStep` JSON keys.
+- WorkManager is initialized with Hilt's worker factory (`AURAApplication` is a `Configuration.Provider`; the manifest removes the default initializer). New workers: `@HiltWorker` + `@AssistedInject`.
+- `app_shortcuts.json` reaches every phone from `main` without review — keep intents on `ActionExecutor.isAllowedIntent`'s list and risky entries behind `confirm_send`.
 - Never set `org.gradle.java.home` in `android/gradle.properties`.
 - Skill steps are templates: never save concrete values (contacts, messages) — use `SkillMatcher.templatize`.
   Patterns with adjacent slots (`{a} {b}`) are rejected because the split is ambiguous.

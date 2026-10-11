@@ -372,7 +372,7 @@ class TaskManager @Inject constructor(
      */
     private fun withVerify(steps: List<ActionStep>): List<ActionStep> {
         if (steps.any { it.action == ActionStep.VERIFY }) return steps
-        if (steps.any { it.action in setOf(ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER) }) {
+        if (steps.any { it.action in NO_AUTO_VERIFY }) {
             return steps
         }
         val apps = steps.filter { it.action == ActionStep.OPEN_APP }.mapNotNull { it.pkg }.distinct()
@@ -508,8 +508,9 @@ class TaskManager @Inject constructor(
             if (!result.ok) {
                 return RunOutcome.StepFailed(result.error ?: "A step didn't work.", index)
             }
-            if (step.action == ActionStep.READ_TEXT && !result.output.isNullOrBlank()) {
-                voiceManager.speak(result.output.take(400), flush = false)
+            // read_text / now_playing / read_notifications return something to say
+            if (!result.output.isNullOrBlank()) {
+                voiceManager.speak(result.output.take(600), flush = false)
             }
         }
         return RunOutcome.Success
@@ -586,6 +587,11 @@ class TaskManager @Inject constructor(
     private companion object {
         /** How many times a task may re-plan from the current screen after a failed step. */
         const val MAX_RECOVERIES = 2
+        /** Plans with these finish outside any app screen — no automatic "app in front" check. */
+        val NO_AUTO_VERIFY = setOf(
+            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
+            ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
+        )
         const val ACCESSIBILITY_OFF =
             "Please turn on AURA in your phone's Accessibility settings first, so I can control apps."
     }

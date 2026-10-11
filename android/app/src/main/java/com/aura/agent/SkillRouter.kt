@@ -30,7 +30,9 @@ data class SkillMatch(
     val params: Map<String, String>,
     val steps: List<ActionStep>,
     val layer: String,
-    val question: String? = null
+    val question: String? = null,
+    /** How specific the matched phrase pattern was (fixed characters). */
+    val patternScore: Int = 0
 )
 
 /**
@@ -126,7 +128,11 @@ class SkillRouter @Inject constructor(
             if (!isCompatible(skill)) continue
             matchSkill(goal, skill, enriched)?.let { matches += it }
         }
-        return matches.maxByOrNull { specificity(it.skill, appMajor) }
+        // Different tasks: the more specific phrase wins ("play X on spotify" over "play X").
+        // Variants of the same task share patterns, so then the phone-specific one wins.
+        return matches.maxWithOrNull(
+            compareBy<SkillMatch> { it.patternScore }.thenBy { specificity(it.skill, appMajor) }
+        )
     }
 
     private suspend fun matchSkill(
@@ -135,27 +141,35 @@ class SkillRouter @Inject constructor(
         enrichCache: MutableMap<Map<String, String>, ContactResolver.Result>
     ): SkillMatch? {
         val patterns = decode(skill.phrasePatterns, stringsSerializer) ?: return null
-        val spoken = SkillMatcher.match(goal, patterns) ?: return null
+        val (spoken, patternScore) = SkillMatcher.matchScored(goal, patterns) ?: return null
         val template = decode(skill.steps, stepsSerializer)?.takeIf { it.isNotEmpty() } ?: return null
         // Look up contacts once per distinct set of values (adds {contact_number}…)
         val resolved = enrichCache.getOrPut(spoken) { contactResolver.enrich(spoken) }
         if (resolved.question != null) {
-            return SkillMatch(skill, spoken, resolved.params, emptyList(), "", resolved.question)
+            return SkillMatch(skill, spoken, resolved.params, emptyList(), "", resolved.question, patternScore)
         }
         val filled = SkillMatcher.fill(template, resolved.params) ?: return null
-        return SkillMatch(skill, spoken, resolved.params, filled, "")
+        return SkillMatch(skill, spoken, resolved.params, filled, "", patternScore = patternScore)
     }
 
     /**
-     * A RAM/disk hit may be a generic (e.g. universal) variant while Room holds a
-     * variant made for this exact phone. Check the task's other variants once.
+     * A RAM/disk hit may not be the best skill overall:
+     *  - a more specific *task* may live only in Room — e.g. RAM has "play {query}" but the
+     *    goal said "…on spotify", so words that landed inside a slot are looked up too;
+     *  - a more specific *variant* of the same task (made for this phone) may be in Room.
+     * The best of these by (pattern specificity, environment specificity) wins.
      */
     private suspend fun preferMoreSpecific(goal: String, hit: SkillMatch): SkillMatch {
+        if (hit.question != null) return hit
         val appMajor = mutableMapOf<String, String?>()
-        if (hit.question != null || hit.skill.intentId.isBlank() || specificity(hit.skill, appMajor) >= EXACT) return hit
-        val siblings = localDao.getVariantsForIntent(hit.skill.intentId)
-        val better = best(goal, siblings) ?: return hit
-        return if (specificity(better.skill, appMajor) > specificity(hit.skill, appMajor)) better else hit
+        val candidates = mutableListOf(hit.skill)
+        val slotWords = SkillMatcher.keywords(hit.spokenParams.values.joinToString(" "))
+        for (word in slotWords) candidates += localDao.findByKeyword(word)
+        if (hit.skill.intentId.isNotBlank() && specificity(hit.skill, appMajor) < EXACT) {
+            candidates += localDao.getVariantsForIntent(hit.skill.intentId)
+        }
+        if (candidates.size == 1) return hit
+        return best(goal, candidates.distinctBy { it.skillId }) ?: hit
     }
 
     /** Can this variant run on this phone at all? */
@@ -195,7 +209,8 @@ class SkillRouter @Inject constructor(
         /** Skin + Android group + app version all match — nothing more specific exists. */
         const val EXACT = 90.0
         val SHORTCUT_ACTIONS = listOf(
-            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER
+            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER,
+            ActionStep.INTENT, ActionStep.MEDIA, ActionStep.REPLY
         )
     }
 }

@@ -127,4 +127,24 @@ class SkillMatcherTest {
             ActionStep(action = "alarm", time = "{time}"))
         assertEquals(setOf("contact_number", "time"), SkillMatcher.slotsInSteps(steps))
     }
+
+    @Test fun `fill and templatize cover intent extras`() {
+        val template = listOf(ActionStep(action = "intent",
+            intentAction = "android.media.action.MEDIA_PLAY_FROM_SEARCH", pkg = "com.spotify.music",
+            extras = mapOf("query" to "{query}", "android.intent.extra.focus" to "vnd.android.cursor.item/*")))
+        val filled = SkillMatcher.fill(template, mapOf("query" to "lofi beats"))!!
+        assertEquals("lofi beats", filled[0].extras!!["query"])
+        assertEquals("vnd.android.cursor.item/*", filled[0].extras!!["android.intent.extra.focus"])
+        assertNull(SkillMatcher.fill(template, emptyMap()))
+        assertEquals("{query}", SkillMatcher.templatize(filled, mapOf("query" to "lofi beats"))[0].extras!!["query"])
+    }
+
+    @Test fun `the more specific pattern scores higher`() {
+        val goal = "play lofi beats on spotify"
+        val generic = SkillMatcher.matchScored(goal, listOf("play {query}"))!!
+        val spotify = SkillMatcher.matchScored(goal, listOf("play {query} on spotify"))!!
+        assertEquals("lofi beats on spotify", generic.first["query"])
+        assertEquals("lofi beats", spotify.first["query"])
+        assertTrue(spotify.second > generic.second)
+    }
 }

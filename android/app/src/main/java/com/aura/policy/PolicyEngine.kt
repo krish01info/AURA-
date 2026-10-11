@@ -55,7 +55,18 @@ class PolicyEngine @Inject constructor() {
         ActionStep.SMS,           // opens the composer, doesn't send
         ActionStep.ALARM,
         ActionStep.TIMER         -> RiskLevel.LOW
-        ActionStep.OPEN_LINK     -> RiskLevel.MEDIUM
+        ActionStep.OPEN_LINK     -> if (isPayment(step)) RiskLevel.HIGH else RiskLevel.MEDIUM
+        // Generic intents only open/prefill screens (allow-listed in ActionExecutor);
+        // a UPI payment link still asks first — the payment app then asks for the PIN.
+        ActionStep.INTENT        -> if (isPayment(step)) RiskLevel.HIGH else RiskLevel.MEDIUM
+
+        // Media keys / reading aloud change nothing important.
+        ActionStep.MEDIA,
+        ActionStep.NOW_PLAYING,
+        ActionStep.READ_NOTIFICATIONS -> RiskLevel.LOW
+
+        // Replying sends a message straight away — always ask.
+        ActionStep.REPLY         -> RiskLevel.HIGH
 
         // MEDIUM — UI interaction but no destructive effect
         ActionStep.SCROLL,
@@ -79,6 +90,9 @@ class PolicyEngine @Inject constructor() {
     private fun classifyConfirmSend(step: ActionStep): RiskLevel {
         return step.risk?.toRiskLevelOrNull() ?: RiskLevel.HIGH
     }
+
+    private fun isPayment(step: ActionStep): Boolean =
+        step.uri?.trim()?.lowercase()?.startsWith("upi:") == true
 
     private fun String.toRiskLevelOrNull(): RiskLevel? = try {
         RiskLevel.valueOf(this.uppercase())

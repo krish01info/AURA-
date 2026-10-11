@@ -49,6 +49,7 @@ com.aura/
 ├── di/             Hilt modules: Database, Network, Supabase
 ├── llm/            Groq + Gemini planning clients
 ├── macros/         Run a list of goals in sequence
+├── notifications/ Notification listener: reply from notifications, read messages, now playing
 ├── memory/         Offline embeddings + recall of past tasks
 ├── policy/         Risk classification, per-app rules, injection defence, audit
 ├── skills/         Skills: per-OS variants, phrase matching, learning, RAM/disk caches, health
@@ -82,6 +83,7 @@ com.aura/
             success → SkillLearner.learn (path that worked) + MemoryManager.remember
 ```
 
+- Built-in skills for 30+ apps are data: `android/app/src/main/assets/app_shortcuts.json` (phones re-download it daily; see `skills/package.md`).
 - Skill model and rules: `skills/package.md`. `SkillRepository` only serves the Skill Store UI.
 
 ## 5. Conventions
@@ -113,4 +115,3 @@ Wrong docs cost more tokens than missing ones.
 | `agent/TaskManager.kt` | ~460 | Core loop — open the function you need |
 | `voice/WakeWordService.kt` | ~580 | Assistant flow — open the section you need |
 | `ui/screens/DashboardScreen.kt` | ~375 | Compose UI only |
-| `skills/SkillSeeder.kt` | ~225 | Static seed data |

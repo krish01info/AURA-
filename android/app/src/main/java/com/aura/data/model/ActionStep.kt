@@ -53,7 +53,20 @@ data class ActionStep(
     val number: String? = null,
 
     /** "HH:MM" (24 h) for alarm; "HH:MM:SS", "MM:SS" or seconds for timer. */
-    val time: String? = null
+    val time: String? = null,
+
+    // ── Generic Android intent (action "intent") ────────────
+    /** e.g. "android.intent.action.VIEW", "android.media.action.MEDIA_PLAY_FROM_SEARCH". */
+    @SerialName("intent_action") val intentAction: String? = null,
+
+    /** MIME type for the intent data / share, e.g. "text/plain". */
+    val mime: String? = null,
+
+    /**
+     * Intent extras. Values are strings; prefix "i:" for Int, "l:" for Long,
+     * "b:" for Boolean (e.g. "b:true"). `{slot}`s are filled like other fields.
+     */
+    val extras: Map<String, String>? = null
 ) {
     companion object {
         // Supported action primitives
@@ -80,6 +93,21 @@ data class ActionStep(
         const val ALARM             = "alarm"      // sets an alarm at [time], label [message]
         const val TIMER             = "timer"      // starts a timer for [time], label [message]
         const val OPEN_LINK         = "open_link"  // opens [uri] (web, maps, wa.me, youtube…)
+
+        /** Any allowed Android intent: [intentAction] + [uri] / [mime] / [extras], optional app [pkg]. */
+        const val INTENT            = "intent"
+
+        /** Media keys for whatever is playing: [text] = play | pause | play_pause | next | previous | stop | volume_up | volume_down | mute. */
+        const val MEDIA             = "media"
+
+        /** Say what's playing now (needs notification access). */
+        const val NOW_PLAYING       = "now_playing"
+
+        /** Reply from a notification: app [pkg], person [text], message [inputText]. Needs notification access. */
+        const val REPLY             = "reply"
+
+        /** Read recent notifications aloud: optional app [pkg], optional person [text]. Needs notification access. */
+        const val READ_NOTIFICATIONS = "read_notifications"
     }
 }
 

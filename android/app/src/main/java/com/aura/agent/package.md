@@ -5,10 +5,10 @@ Owns the task execution lifecycle.
 | File | Role |
 |---|---|
 | TaskManager.kt | Entry point. `execute(goal)` / `executeDirectSteps()`. Orchestrates everything; `setupProblem()` explains what's missing (Accessibility off, no API key). (~460 lines — open the function you need) |
-| ActionExecutor.kt | Turns an `ActionStep` into a real action and returns a `StepResult` (ok / user-readable error). Screen actions via the AccessibilityService (waits up to 4 s for nodes, then for the screen to settle); shortcut actions via Android intents (`dial`, `sms`, `alarm`, `timer`, `open_link`); `verify` checks the right app/text is on screen. |
+| ActionExecutor.kt | Turns an `ActionStep` into a real action and returns a `StepResult` (ok / user-readable error). Screen actions via the AccessibilityService (waits up to 4 s for nodes, then for the screen to settle); shortcut actions via Android intents (`dial`, `sms`, `alarm`, `timer`, `open_link`, generic `intent` on an allow-list — `isAllowedIntent`); `media` keys; `now_playing` / `reply` / `read_notifications` via `notifications/NotificationStore`; `verify` checks the right app/text is on screen. |
 | ContactResolver.kt | Spoken name → exact contact + `{contact_number}` / `{contact_number_digits}`; asks when two people match. Needs READ_CONTACTS (optional). |
 | TimeParser.kt | "7:30 pm" / "5 minutes" → numbers for alarms and timers (pure, tested). |
-| SkillRouter.kt | `findSkill(goal)` → `SkillMatch` (variant + filled steps). L1 RAM → L2 disk → L3 Room → L4 cloud; only variants compatible with this phone whose phrase pattern matches; most specific wins. `null` → LLM plans. |
+| SkillRouter.kt | `findSkill(goal)` → `SkillMatch` (variant + filled steps). L1 RAM → L2 disk → L3 Room → L4 cloud; only variants compatible with this phone whose phrase pattern matches; the most specific phrase wins, then the most specific variant (shortcut steps get a small bonus). `null` → LLM plans. |
 | TaskState.kt | Sealed states: Created / Planning / Executing / WaitingForUser / Verifying / Completed / Failed / Cancelled |
 
 ## Key flow in TaskManager

@@ -80,7 +80,14 @@ object SkillMatcher {
      * Try each pattern against [goal]. Returns the filled parameters for the most
      * specific matching pattern (most literal characters), or null if none match.
      */
-    fun match(goal: String, patterns: List<String>): Map<String, String>? {
+    fun match(goal: String, patterns: List<String>): Map<String, String>? = matchScored(goal, patterns)?.first
+
+    /**
+     * Like [match], also returning how specific the matching pattern was (number of
+     * fixed characters). Used to pick between different skills: "play {q} on spotify"
+     * must beat "play {q}" for "play lofi on spotify".
+     */
+    fun matchScored(goal: String, patterns: List<String>): Pair<Map<String, String>, Int>? {
         val g = clean(goal)
         if (g.isEmpty()) return null
         return patterns
@@ -89,7 +96,7 @@ object SkillMatcher {
             .filter { it.isNotEmpty() }
             .distinct()
             .sortedByDescending { literalLength(it) }
-            .mapNotNull { pattern -> matchOne(g, pattern) }
+            .mapNotNull { pattern -> matchOne(g, pattern)?.let { it to literalLength(pattern) } }
             .firstOrNull()
     }
 
@@ -144,7 +151,9 @@ object SkillMatcher {
                 pkg = f(st.pkg), text = f(st.text), viewId = f(st.viewId),
                 inputText = f(st.inputText), message = f(st.message),
                 clarification = f(st.clarification),
-                uri = u(st.uri), number = f(st.number), time = f(st.time)
+                uri = u(st.uri), number = f(st.number), time = f(st.time),
+                intentAction = f(st.intentAction), mime = f(st.mime),
+                extras = st.extras?.mapValues { (_, v) -> f(v) ?: v }
             )
         }
         return if (slotsInSteps(filled).isNotEmpty()) null else filled
@@ -155,7 +164,8 @@ object SkillMatcher {
         steps.flatMap { st -> textFields(st).flatMap { slots(it) } }.toSet()
 
     private fun textFields(st: ActionStep): List<String> =
-        listOfNotNull(st.pkg, st.text, st.viewId, st.inputText, st.message, st.uri, st.number, st.time)
+        listOfNotNull(st.pkg, st.text, st.viewId, st.inputText, st.message, st.uri, st.number, st.time,
+            st.intentAction, st.mime) + st.extras?.values.orEmpty()
 
     /** URL-encode for use inside a link (spaces as %20, not +). */
     fun encode(value: String): String =
@@ -192,7 +202,8 @@ object SkillMatcher {
         return steps.map { st ->
             st.copy(
                 text = t(st.text), inputText = t(st.inputText), message = t(st.message),
-                number = t(st.number), time = t(st.time), uri = tu(st.uri)
+                number = t(st.number), time = t(st.time), uri = tu(st.uri),
+                extras = st.extras?.mapValues { (_, v) -> t(v) ?: v }
             )
         }
     }
