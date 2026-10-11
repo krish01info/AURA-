@@ -26,6 +26,8 @@ Read it, then only the `package.md` of the package you're changing.
   Play Store search missed, saying "no" got stuck, mic flickered on/off. Fixed in the "device-test fixes" PR
   (compound-command guard in `SkillMatcher`, new `call` action, more Play Store phrases, `ApprovalParser` +
   "what should I do instead?", wake-session backoff). **Not re-tested on the phone yet** — ask the owner.
+- ✅ Popup controls (2026-10-11): **Stop** on the working banner, **Wrong** after Done (drops that skill, asks
+  what you wanted), app-lock wait ("Unlock the app", 45 s, then retries the step). Not phone-tested yet.
 - ⚠️ Cloud (Supabase) isn't configured yet; when it is, run `docs/cloud/supabase_skill_packs.sql` first.
 
 ## Next steps (in priority order)

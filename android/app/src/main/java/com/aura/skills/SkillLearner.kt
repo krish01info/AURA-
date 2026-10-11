@@ -9,6 +9,7 @@ import com.aura.llm.Plan
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,14 +50,15 @@ class SkillLearner @Inject constructor(
      * @param plan     the LLM plan (intent, params, patterns)
      * @param template the executed steps with values replaced by `{slot}`s
      */
-    suspend fun learn(goal: String, plan: Plan, template: List<ActionStep>) {
+    /** Saves the run as a skill variant; returns its id, or null if it wasn't saved. */
+    suspend fun learn(goal: String, plan: Plan, template: List<ActionStep>): String? {
         try {
             // Only values spoken by the user; app-derived ones (contact numbers) aren't in patterns.
             val params = plan.params.filterKeys { it !in SkillMatcher.DERIVED_SLOTS }
             val appPackage = plan.app?.trim()?.takeIf { it.contains('.') }
                 ?: template.firstOrNull { it.action == ActionStep.OPEN_APP && !it.pkg.isNullOrBlank() }?.pkg
                 ?: "unknown"
-            if (template.any { it.action == ActionStep.CLARIFY }) return
+            if (template.any { it.action == ActionStep.CLARIFY }) return null
 
             // ── Phrase patterns (how to recognise this task next time) ──
             val patterns = (listOfNotNull(SkillMatcher.derivePattern(goal, params)) +
@@ -66,14 +68,14 @@ class SkillLearner @Inject constructor(
                 .distinct()
             if (patterns.isEmpty()) {
                 Log.i(TAG, "Not saving \"$goal\": no safe phrase pattern (values can't be told apart)")
-                return
+                return null
             }
             // Every slot used by the steps must be fillable from the patterns.
             val stepSlots = SkillMatcher.slotsInSteps(template)
             val fillable = params.keys + SkillMatcher.DERIVED_SLOTS
             if (!fillable.containsAll(stepSlots)) {
                 Log.w(TAG, "Not saving \"$goal\": steps use unknown slots ${stepSlots - fillable}")
-                return
+                return null
             }
 
             // ── Identity ─────────────────────────────────────────────
@@ -158,8 +160,12 @@ class SkillLearner @Inject constructor(
                 .forEach { sibling ->
                     save(sibling.copy(phrasePatterns = patternsJson, triggerKeywords = keywordsJson), upload = false)
                 }
+            return variantId
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to learn skill: ${e.message}", e)
+            return null
         }
     }
 

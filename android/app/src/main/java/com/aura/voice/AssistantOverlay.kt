@@ -34,8 +34,9 @@ private const val TAG = "AssistantOverlay"
  *  3. Otherwise nothing is shown ([show] returns false); voice still works.
  *
  * Built with plain Views (no Compose lifecycle needed in a service window).
- * While a task runs the panel becomes a small, touch-through banner at the top so
- * it never blocks the taps AURA performs in the target app.
+ * While a task runs the panel becomes a small banner at the top with a Stop button.
+ * It lets AURA's own tap/swipe gestures through ([ActionExecutor.gestureListener]),
+ * so it never blocks the taps AURA performs in the target app.
  * All methods are safe to call from any thread.
  */
 @Singleton
@@ -50,14 +51,22 @@ class AssistantOverlay @Inject constructor(
         val onOpenApp: (() -> Unit)? = null,
         val onTalk: (() -> Unit)? = null,
         val onClose: (() -> Unit)? = null,
-        val onCancel: (() -> Unit)? = null
+        val onCancel: (() -> Unit)? = null,
+        val onStop: (() -> Unit)? = null,
+        val onWrong: (() -> Unit)? = null
     )
 
     private val main = Handler(Looper.getMainLooper())
 
+    init {
+        // AURA's gestures must reach the app, not this window.
+        actionExecutor.gestureListener = { through -> main.post { setTouchThrough(through) } }
+    }
+
     private var windowManager: WindowManager? = null
     private var root: LinearLayout? = null
     private var params: WindowManager.LayoutParams? = null
+    private var brandView: TextView? = null
     private var titleView: TextView? = null
     private var bodyView: TextView? = null
     private var buttonRow: LinearLayout? = null
@@ -82,8 +91,11 @@ class AssistantOverlay @Inject constructor(
         return true
     }
 
-    /** Small, touch-through banner at the top — used while steps are executing. */
-    fun showWorking(title: String, body: String? = null) {
+    /**
+     * Small banner at the top — used while steps run or while waiting for an unlock,
+     * so it never covers the app's buttons, PIN pad or fingerprint sensor.
+     */
+    fun showWorking(title: String, body: String? = null, onStop: (() -> Unit)? = null) {
         if (!canDraw()) return
         main.post {
             if (!ensureWindow()) return@post
@@ -91,7 +103,7 @@ class AssistantOverlay @Inject constructor(
             titleView?.text = title
             bodyView?.text = body.orEmpty()
             bodyView?.visibility = if (body.isNullOrBlank()) View.GONE else View.VISIBLE
-            setButtons(Actions())
+            setButtons(Actions(onStop = onStop))
         }
     }
 
@@ -107,6 +119,7 @@ class AssistantOverlay @Inject constructor(
             root = null
             windowManager = null
             params = null
+            brandView = null
             titleView = null
             bodyView = null
             buttonRow = null
@@ -163,14 +176,28 @@ class AssistantOverlay @Inject constructor(
         if (compact == value && root?.isAttachedToWindow == true) return
         compact = value
         lp.gravity = if (value) Gravity.TOP else Gravity.BOTTOM
-        lp.flags = if (value) {
-            lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        }
+        // Touchable in both modes (the banner has Stop); gestures pass via setTouchThrough.
+        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         root?.alpha = if (value) 0.92f else 1f
+        brandView?.visibility = if (value) View.GONE else View.VISIBLE
+        titleView?.setTextSize(TypedValue.COMPLEX_UNIT_SP, if (value) 16f else 20f)
         try {
             windowManager?.updateViewLayout(root, lp)
+        } catch (e: Exception) {
+            Log.w(TAG, "updateViewLayout failed: ${e.message}")
+        }
+    }
+
+    /** While AURA performs a gesture, let touches pass through the panel to the app. */
+    private fun setTouchThrough(through: Boolean) {
+        val lp = params ?: return
+        val view = root ?: return
+        val flags = if (through) lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            else lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        if (flags == lp.flags) return
+        lp.flags = flags
+        try {
+            windowManager?.updateViewLayout(view, lp)
         } catch (e: Exception) {
             Log.w(TAG, "updateViewLayout failed: ${e.message}")
         }
@@ -224,6 +251,7 @@ class AssistantOverlay @Inject constructor(
         card.addView(buttons)
         outer.addView(card)
 
+        brandView = brand
         titleView = title
         bodyView = body
         buttonRow = buttons
@@ -251,6 +279,8 @@ class AssistantOverlay @Inject constructor(
             ).apply { marginStart = dp(ctx, 8) })
         }
         actions.onCancel?.let { add("Cancel", false, it) }
+        actions.onStop?.let { add("Stop", false, it) }
+        actions.onWrong?.let { add("Wrong", false, it) }
         actions.onClose?.let { add("Close", false, it) }
         actions.onTalk?.let { add("Talk", false, it) }
         actions.onDeny?.let { add("Deny", false, it) }

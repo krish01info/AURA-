@@ -38,6 +38,12 @@ sealed class TaskState {
         val anomalyWarning: String? = null
     ) : TaskState()
 
+    /**
+     * Paused — the app asked for its lock (fingerprint / PIN / pattern) or the phone is locked.
+     * AURA never enters PINs; it waits for the user to unlock, then retries the step.
+     */
+    data class WaitingForUnlock(val appName: String?) : TaskState()
+
     /** All steps executed — agent is verifying the outcome. */
     data object Verifying : TaskState()
 

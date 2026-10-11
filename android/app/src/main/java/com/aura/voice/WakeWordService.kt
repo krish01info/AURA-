@@ -446,10 +446,16 @@ class WakeWordService : Service() {
                 AssistantOverlay.Actions(onCancel = { taskManager.emergencyStop() }))
             is TaskState.Executing -> overlay.showWorking(
                 "Step ${state.stepIndex + 1} of ${state.totalSteps}",
-                describe(state.currentStep.action, state.currentStep.text ?: state.currentStep.pkg)
+                describe(state.currentStep.action, state.currentStep.text ?: state.currentStep.pkg),
+                onStop = { taskManager.emergencyStop() }
+            )
+            is TaskState.WaitingForUnlock -> overlay.showWorking(
+                "Unlock ${state.appName ?: "the app"}",
+                "I'll continue as soon as it's open.",
+                onStop = { taskManager.emergencyStop() }
             )
             is TaskState.WaitingForUser -> askApproval(state)
-            is TaskState.Completed -> finishTask("Done", null, 2500)
+            is TaskState.Completed -> finishTask("Done", "Not what you wanted? Tap Wrong.", DONE_SHOW_MS, canSayWrong = true)
             is TaskState.Failed -> {
                 val correction = pendingCorrection
                 pendingCorrection = null
@@ -516,13 +522,27 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun finishTask(title: String, body: String?, showMs: Long) {
+    private fun finishTask(title: String, body: String?, showMs: Long, canSayWrong: Boolean = false) {
         flowJob?.cancel()
         overlay.show(title, body, AssistantOverlay.Actions(
+            onWrong = if (canSayWrong) ({ onWrongResult() }) else null,
             onTalk = { startCommandCapture() },
             onClose = { closePanel() }
         ))
         scheduleClose(showMs)
+    }
+
+    /** "Wrong" after Done: forget the skill that did it, then ask what they wanted. */
+    private fun onWrongResult() {
+        hideJob?.cancel()
+        if (!taskManager.reportWrong()) {
+            closePanel()
+            return
+        }
+        startCommandCapture(
+            title = "Sorry about that",
+            hint = "I won't do it that way again. What did you want?"
+        )
     }
 
     private fun scheduleClose(afterMs: Long) {
@@ -703,6 +723,8 @@ class WakeWordService : Service() {
         private val ON_DEVICE_UNSUPPORTED_ERRORS = setOf(12, 13)
         /** How long the heard command is shown (with Cancel) before it runs. */
         private const val CONFIRM_HEARD_MS = 1300L
+        /** How long "Done" (with its Wrong button) stays up. */
+        private const val DONE_SHOW_MS = 6000L
 
         /** "hey aura", "ok aura", "hi ora", … (speech engines often mishear "aura"). */
         private val WAKE_REGEX = Regex(
