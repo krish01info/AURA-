@@ -325,19 +325,29 @@ class WakeWordService : Service() {
         }
     }
 
+    /**
+     * Show what was heard with a Cancel button for a moment, then run it — so a
+     * misheard command can be stopped before anything happens.
+     */
     private fun runCommand(command: String) {
         Log.i(TAG, "Command: \"$command\"")
-        mode = Mode.TASK
+        mode = Mode.COMMAND
         destroyWakeRecognizer()
         hideJob?.cancel()
-        overlay.show("“$command”", "Working on it…", AssistantOverlay.Actions(onClose = { closePanel() }))
-        lastHandledState = null
-        taskManager.reset()
-        taskManager.execute(command)
-        // execute() can fail synchronously (e.g. setup problem) — handle that now.
-        onTaskState(taskManager.state.value)
-        // Keep listening in the background so "Hey AURA, stop" works mid-task.
-        scheduleWake(1500)
+        flowJob?.cancel()
+        overlay.show("\u201C$command\u201D", "Starting…", AssistantOverlay.Actions(onCancel = { closePanel() }))
+        flowJob = scope.launch {
+            delay(CONFIRM_HEARD_MS)
+            mode = Mode.TASK
+            overlay.show("\u201C$command\u201D", "Working on it…", AssistantOverlay.Actions(onClose = { closePanel() }))
+            lastHandledState = null
+            taskManager.reset()
+            taskManager.execute(command)
+            // execute() can fail synchronously (e.g. setup problem) — handle that now.
+            onTaskState(taskManager.state.value)
+            // Keep listening in the background so "Hey AURA, stop" works mid-task.
+            scheduleWake(1500)
+        }
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -450,7 +460,7 @@ class WakeWordService : Service() {
     private fun recognizerIntent(partial: Boolean) =
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoicePrefs.wakeLanguageTag(this@WakeWordService))
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, partial)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
@@ -523,12 +533,16 @@ class WakeWordService : Service() {
         const val ACTION_TURN_OFF   = "com.aura.assistant.TURN_OFF"
 
         private const val RESTART_MS = 250L
+        /** How long the heard command is shown (with Cancel) before it runs. */
+        private const val CONFIRM_HEARD_MS = 1300L
 
         /** "hey aura", "ok aura", "hi ora", … (speech engines often mishear "aura"). */
         private val WAKE_REGEX = Regex(
             "\\b(hey|hi|hay|ok|okay|hello)[\\s,]+(aura|ora|aurah|oura|orra|aara|aira|aurora)\\b",
             RegexOption.IGNORE_CASE
         )
+        /** Hindi-script recognitions of "Hey AURA" (no \\b: it doesn't work with Devanagari). */
+        private val WAKE_REGEX_HI = Regex("(हे|है|हाय|ओके)\\s*(ऑरा|ओरा|औरा|आरा)")
         /** Utterance that starts with the name: "Aura, open YouTube". */
         private val NAME_FIRST_REGEX = Regex("^\\s*(aura|aurah|oura)\\b", RegexOption.IGNORE_CASE)
         private val STOP_REGEX = Regex("^\\s*(stop|cancel|abort)\\b.*", RegexOption.IGNORE_CASE)
@@ -542,7 +556,8 @@ class WakeWordService : Service() {
          * ("" if nothing). Returns null if there's no wake phrase.
          */
         fun extractCommand(text: String): String? {
-            val match = WAKE_REGEX.find(text) ?: NAME_FIRST_REGEX.find(text) ?: return null
+            val match = WAKE_REGEX.find(text) ?: WAKE_REGEX_HI.find(text)
+                ?: NAME_FIRST_REGEX.find(text) ?: return null
             return text.substring(match.range.last + 1).trim(' ', ',', '.', '!', '?', ':')
         }
 

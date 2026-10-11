@@ -5,18 +5,20 @@ Owns the task execution lifecycle.
 | File | Role |
 |---|---|
 | TaskManager.kt | Entry point. `execute(goal)` / `executeDirectSteps()`. Orchestrates everything; `setupProblem()` explains what's missing (Accessibility off, no API key). (~460 lines — open the function you need) |
-| ActionExecutor.kt | Turns an `ActionStep` into a real action via the AccessibilityService and returns a `StepResult` (ok / user-readable error). Waits up to 4 s for nodes; opens apps by package or by app name. |
+| ActionExecutor.kt | Turns an `ActionStep` into a real action and returns a `StepResult` (ok / user-readable error). Screen actions via the AccessibilityService (waits up to 4 s for nodes, then for the screen to settle); shortcut actions via Android intents (`dial`, `sms`, `alarm`, `timer`, `open_link`); `verify` checks the right app/text is on screen. |
+| ContactResolver.kt | Spoken name → exact contact + `{contact_number}` / `{contact_number_digits}`; asks when two people match. Needs READ_CONTACTS (optional). |
+| TimeParser.kt | "7:30 pm" / "5 minutes" → numbers for alarms and timers (pure, tested). |
 | SkillRouter.kt | `findSkill(goal)` → `SkillMatch` (variant + filled steps). L1 RAM → L2 disk → L3 Room → L4 cloud; only variants compatible with this phone whose phrase pattern matches; most specific wins. `null` → LLM plans. |
 | TaskState.kt | Sealed states: Created / Planning / Executing / WaitingForUser / Verifying / Completed / Failed / Cancelled |
 
 ## Key flow in TaskManager
 1. Sanitize goal; stop early with a spoken reason if `setupProblem()` is not null
-2. Stored skill (`SkillRouter.findSkill`)? run its filled steps → success: `SkillUpdater.recordSuccess` / a step fails: `SkillUpdater.handleFailure`, then re-plan with the LLM once
-3. LLM plan: Groq → Gemini fallback → `Plan` (steps + intent + params + patterns); steps are filled with the params to run, and templatized to save
-4. `runStepsInternal`: per step `AppPermissionManager` → `PolicyEngine` → LOW/MEDIUM run, HIGH/CRITICAL wait for approval; **stops at the first failed step**
-5. Success → `SkillLearner.learn(goal, plan, template)` (only after the plan worked) + `MemoryManager.remember`
+2. Stored skill (`SkillRouter.findSkill`, contacts resolved inside)? use its filled steps. Else LLM plan (Groq → Gemini) → `Plan`; contacts resolved; filled; a `verify` step added if missing (`withVerify`)
+3. `runWithRecovery`: `runStepsInternal` runs steps (permission → policy → approval for HIGH/CRITICAL); on a failed step it asks the LLM for the **remaining** steps from the current screen (`PlannerPrompt.continueMessage`), up to `MAX_RECOVERIES` = 2
+4. Success (incl. the final `verify`) → `finishSuccess`; stored skill unchanged → `SkillUpdater.recordSuccess`; new or recovered path → `SkillLearner.learn` with the steps that actually worked (templatized)
+5. Failure → spoken reason; a stored skill also gets `SkillUpdater.handleFailure`
 
 ## Rules
-- New action type → constant in `ActionStep` companion + branch in `ActionExecutor.execute()` returning a `StepResult` + line in `llm/PlannerPrompt.SYSTEM`.
+- New action type → constant in `ActionStep` companion + branch in `ActionExecutor.execute()` returning a `StepResult` + line in `llm/PlannerPrompt.SYSTEM` + risk in `policy/PolicyEngine` (unknown = HIGH) + any new field in `SkillMatcher.fill/templatize`.
 - Never decide risk here; ask `PolicyEngine.classify()`.
 - The Accessibility service keeps the process alive; there is no separate keep-alive service.

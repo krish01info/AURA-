@@ -51,7 +51,8 @@ class SkillLearner @Inject constructor(
      */
     suspend fun learn(goal: String, plan: Plan, template: List<ActionStep>) {
         try {
-            val params = plan.params
+            // Only values spoken by the user; app-derived ones (contact numbers) aren't in patterns.
+            val params = plan.params.filterKeys { it !in SkillMatcher.DERIVED_SLOTS }
             val appPackage = plan.app?.trim()?.takeIf { it.contains('.') }
                 ?: template.firstOrNull { it.action == ActionStep.OPEN_APP && !it.pkg.isNullOrBlank() }?.pkg
                 ?: "unknown"
@@ -68,11 +69,10 @@ class SkillLearner @Inject constructor(
                 return
             }
             // Every slot used by the steps must be fillable from the patterns.
-            val stepSlots = template.flatMap { st ->
-                listOfNotNull(st.pkg, st.text, st.viewId, st.inputText, st.message).flatMap { SkillMatcher.slots(it) }
-            }.toSet()
-            if (!params.keys.containsAll(stepSlots)) {
-                Log.w(TAG, "Not saving \"$goal\": steps use unknown slots ${stepSlots - params.keys}")
+            val stepSlots = SkillMatcher.slotsInSteps(template)
+            val fillable = params.keys + SkillMatcher.DERIVED_SLOTS
+            if (!fillable.containsAll(stepSlots)) {
+                Log.w(TAG, "Not saving \"$goal\": steps use unknown slots ${stepSlots - fillable}")
                 return
             }
 

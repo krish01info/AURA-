@@ -62,8 +62,14 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
         uiContext: String,
         activeModel: String? = null,
         memoryContext: String = ""
-    ): Plan {
-        val userContent = PlannerPrompt.userMessage(goal, uiContext, memoryContext)
+    ): Plan = complete(PlannerPrompt.userMessage(goal, uiContext, memoryContext), activeModel)
+
+    /**
+     * Send any planner request (a new plan, or a recovery "continue" request built
+     * with [PlannerPrompt.continueMessage]) and parse the reply.
+     * @throws LlmException with a user-readable message if every model fails.
+     */
+    suspend fun complete(userContent: String, activeModel: String? = null): Plan {
         val cascade = if (activeModel != null) listOf(activeModel to activeModel) else MODEL_CASCADE
         var lastError: LlmException? = null
 

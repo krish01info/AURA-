@@ -1,6 +1,9 @@
 package com.aura.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.RadioButton
+import com.aura.voice.VoicePrefs
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +73,7 @@ fun SettingsScreen(
     val groqKey by viewModel.groqKey.collectAsState()
     val geminiKey by viewModel.geminiKey.collectAsState()
     val voiceNarration by viewModel.voiceNarration.collectAsState()
+    val speechLanguage by viewModel.speechLanguage.collectAsState()
     val updateInfo by viewModel.updateInfo.collectAsState()
     val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
 
@@ -175,6 +179,29 @@ fun SettingsScreen(
                 checked = voiceNarration,
                 onCheckedChange = { viewModel.setVoiceNarration(it) }
             )
+
+            // ── Speech language ───────────────────────────────────────────
+            Text(
+                "Speech language",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            VoicePrefs.LANGUAGES.forEach { (tag, label) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.setSpeechLanguage(tag) }
+                ) {
+                    RadioButton(
+                        selected = speechLanguage == tag,
+                        onClick = { viewModel.setSpeechLanguage(tag) }
+                    )
+                    Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

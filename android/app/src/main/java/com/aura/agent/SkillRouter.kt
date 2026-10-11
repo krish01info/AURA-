@@ -18,12 +18,19 @@ import kotlin.math.ln
 
 private const val TAG = "SkillRouter"
 
-/** A stored skill variant that fits the goal, with its steps already filled in. */
+/**
+ * A stored skill variant that fits the goal, with its steps already filled in.
+ * @param spokenParams values taken from the user's words (used for learning)
+ * @param params       spokenParams + contact details from [ContactResolver] (used to run)
+ * @param question     set when a contact name is ambiguous — ask instead of running
+ */
 data class SkillMatch(
     val skill: SkillPackEntity,
+    val spokenParams: Map<String, String>,
     val params: Map<String, String>,
     val steps: List<ActionStep>,
-    val layer: String
+    val layer: String,
+    val question: String? = null
 )
 
 /**
@@ -51,7 +58,8 @@ class SkillRouter @Inject constructor(
     private val diskCache: SkillDiskCache,
     private val localDao: SkillPackDao,
     private val cloudApi: SupabaseSkillApi,
-    private val os: OsFingerprint
+    private val os: OsFingerprint,
+    private val contactResolver: ContactResolver
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val stepsSerializer = ListSerializer(ActionStep.serializer())
@@ -109,21 +117,33 @@ class SkillRouter @Inject constructor(
     // Selection
     // ──────────────────────────────────────────────────────────────
 
-    private fun best(goal: String, candidates: List<SkillPackEntity>): SkillMatch? {
+    private suspend fun best(goal: String, candidates: List<SkillPackEntity>): SkillMatch? {
         if (candidates.isEmpty()) return null
         val appMajor = mutableMapOf<String, String?>()
-        return candidates.asSequence()
-            .filter { isCompatible(it) }
-            .mapNotNull { skill -> matchSkill(goal, skill) }
-            .maxByOrNull { specificity(it.skill, appMajor) }
+        val enriched = mutableMapOf<Map<String, String>, ContactResolver.Result>()
+        val matches = mutableListOf<SkillMatch>()
+        for (skill in candidates) {
+            if (!isCompatible(skill)) continue
+            matchSkill(goal, skill, enriched)?.let { matches += it }
+        }
+        return matches.maxByOrNull { specificity(it.skill, appMajor) }
     }
 
-    private fun matchSkill(goal: String, skill: SkillPackEntity): SkillMatch? {
+    private suspend fun matchSkill(
+        goal: String,
+        skill: SkillPackEntity,
+        enrichCache: MutableMap<Map<String, String>, ContactResolver.Result>
+    ): SkillMatch? {
         val patterns = decode(skill.phrasePatterns, stringsSerializer) ?: return null
-        val params = SkillMatcher.match(goal, patterns) ?: return null
+        val spoken = SkillMatcher.match(goal, patterns) ?: return null
         val template = decode(skill.steps, stepsSerializer)?.takeIf { it.isNotEmpty() } ?: return null
-        val filled = SkillMatcher.fill(template, params) ?: return null
-        return SkillMatch(skill, params, filled, "")
+        // Look up contacts once per distinct set of values (adds {contact_number}…)
+        val resolved = enrichCache.getOrPut(spoken) { contactResolver.enrich(spoken) }
+        if (resolved.question != null) {
+            return SkillMatch(skill, spoken, resolved.params, emptyList(), "", resolved.question)
+        }
+        val filled = SkillMatcher.fill(template, resolved.params) ?: return null
+        return SkillMatch(skill, spoken, resolved.params, filled, "")
     }
 
     /**
@@ -132,7 +152,7 @@ class SkillRouter @Inject constructor(
      */
     private suspend fun preferMoreSpecific(goal: String, hit: SkillMatch): SkillMatch {
         val appMajor = mutableMapOf<String, String?>()
-        if (hit.skill.intentId.isBlank() || specificity(hit.skill, appMajor) >= EXACT) return hit
+        if (hit.question != null || hit.skill.intentId.isBlank() || specificity(hit.skill, appMajor) >= EXACT) return hit
         val siblings = localDao.getVariantsForIntent(hit.skill.intentId)
         val better = best(goal, siblings) ?: return hit
         return if (specificity(better.skill, appMajor) > specificity(hit.skill, appMajor)) better else hit
@@ -159,6 +179,8 @@ class SkillRouter @Inject constructor(
         if (skill.deviceModel != null && skill.deviceModel == os.deviceModel) score += 5
         score += skill.successRate * 4
         score += ln(1.0 + skill.usageCount) * 0.3
+        // Shortcut-based steps (intents/links) are more reliable than tapping through screens.
+        if (SHORTCUT_ACTIONS.any { skill.steps.contains("\"$it\"") }) score += 1.0
         return score
     }
 
@@ -172,5 +194,8 @@ class SkillRouter @Inject constructor(
         const val UNIVERSAL = "universal"
         /** Skin + Android group + app version all match — nothing more specific exists. */
         const val EXACT = 90.0
+        val SHORTCUT_ACTIONS = listOf(
+            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER
+        )
     }
 }

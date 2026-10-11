@@ -37,6 +37,12 @@ object SkillMatcher {
         RegexOption.IGNORE_CASE
     )
 
+    /**
+     * Slots filled by the app at run time, not taken from the user's words
+     * (see agent/ContactResolver). Steps may use them; patterns never contain them.
+     */
+    val DERIVED_SLOTS = setOf("contact_number", "contact_number_digits")
+
     /** Words ignored when building keyword lists for candidate lookup. */
     val STOP_WORDS = setOf(
         "the", "a", "an", "to", "for", "in", "on", "at", "and", "or", "of", "with", "my",
@@ -129,23 +135,37 @@ object SkillMatcher {
         fun f(s: String?): String? = s?.let { text ->
             SLOT.replace(text) { m -> params[m.groupValues[1]] ?: m.value }
         }
+        // Values placed inside a link must be URL-encoded ("hi there" → "hi%20there").
+        fun u(s: String?): String? = s?.let { text ->
+            SLOT.replace(text) { m -> params[m.groupValues[1]]?.let(::encode) ?: m.value }
+        }
         val filled = steps.map { st ->
             st.copy(
                 pkg = f(st.pkg), text = f(st.text), viewId = f(st.viewId),
                 inputText = f(st.inputText), message = f(st.message),
-                clarification = f(st.clarification)
+                clarification = f(st.clarification),
+                uri = u(st.uri), number = f(st.number), time = f(st.time)
             )
         }
-        val leftover = filled.any { st ->
-            listOf(st.pkg, st.text, st.viewId, st.inputText, st.message).any { it != null && SLOT.containsMatchIn(it) }
-        }
-        return if (leftover) null else filled
+        return if (slotsInSteps(filled).isNotEmpty()) null else filled
     }
+
+    /** Slot names still present in the steps' text fields. */
+    fun slotsInSteps(steps: List<ActionStep>): Set<String> =
+        steps.flatMap { st -> textFields(st).flatMap { slots(it) } }.toSet()
+
+    private fun textFields(st: ActionStep): List<String> =
+        listOfNotNull(st.pkg, st.text, st.viewId, st.inputText, st.message, st.uri, st.number, st.time)
+
+    /** URL-encode for use inside a link (spaces as %20, not +). */
+    fun encode(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     /**
      * Turn concrete steps into a reusable template: every occurrence of a param
      * value becomes `{slot}`. Longest values first so "Priya Sharma" wins over "Priya".
      * Values shorter than 2 characters are left alone (too likely to collide).
+     * Inside links the URL-encoded form of the value is replaced too.
      */
     fun templatize(steps: List<ActionStep>, params: Map<String, String>): List<ActionStep> {
         val ordered = params.entries
@@ -153,15 +173,26 @@ object SkillMatcher {
             .sortedByDescending { it.value.length }
         fun t(s: String?): String? {
             if (s == null) return null
-            var out = s
+            var out: String = s
             for ((name, value) in ordered) {
-                out = out!!.replace(Regex(Regex.escape(value.trim()), RegexOption.IGNORE_CASE), "{$name}")
+                out = out.replace(Regex(Regex.escape(value.trim()), RegexOption.IGNORE_CASE), "{$name}")
+            }
+            return out
+        }
+        fun tu(s: String?): String? {
+            if (s == null) return null
+            var out: String = s
+            for ((name, value) in ordered) {
+                for (form in listOf(encode(value.trim()), encode(value.trim()).replace("%20", "+"), value.trim())) {
+                    out = out.replace(Regex(Regex.escape(form), RegexOption.IGNORE_CASE), "{$name}")
+                }
             }
             return out
         }
         return steps.map { st ->
             st.copy(
-                text = t(st.text), inputText = t(st.inputText), message = t(st.message)
+                text = t(st.text), inputText = t(st.inputText), message = t(st.message),
+                number = t(st.number), time = t(st.time), uri = tu(st.uri)
             )
         }
     }

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.data.model.UpdateInfo
 import com.aura.llm.ApiKeyStore
+import com.aura.voice.VoicePrefs
 import com.aura.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -45,6 +46,9 @@ class SettingsViewModel @Inject constructor(
     private val _voiceNarration = MutableStateFlow(readBool(KEY_VOICE, default = false))
     val voiceNarration: StateFlow<Boolean> = _voiceNarration
 
+    private val _speechLanguage = MutableStateFlow(VoicePrefs.speechLanguage(context))
+    val speechLanguage: StateFlow<String> = _speechLanguage
+
     // ── Update state ──────────────────────────────────────────────────────────
 
     val updateInfo: StateFlow<UpdateInfo?> = updateRepository.updateInfo.stateIn(
@@ -69,6 +73,12 @@ class SettingsViewModel @Inject constructor(
     fun setGeminiKey(value: String) {
         _geminiKey.value = value
         apiKeyStore.setGeminiKey(value)
+    }
+
+    /** "" = phone default; e.g. "en-IN", "hi-IN". Used by the next recognition. */
+    fun setSpeechLanguage(tag: String) {
+        _speechLanguage.value = tag
+        VoicePrefs.setSpeechLanguage(context, tag)
     }
 
     fun setVoiceNarration(value: Boolean) {

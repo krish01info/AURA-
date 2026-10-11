@@ -29,7 +29,7 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 | SkillHealthMonitor.kt | Success/failure counts; BROKEN (≥2 failures and < 60%) → stale + evicted from RAM/disk. |
 | SkillUpdater.kt | Called by TaskManager after each stored-skill run; DEGRADED → checks cloud for a newer version. |
 | SkillRepository.kt | Data access for the Skill Store/Dashboard UI (not used for lookup). |
-| SkillSeeder.kt | Built-in universal seeds (WhatsApp, YouTube, Maps, Gmail, Zomato), inserted if missing. |
+| SkillSeeder.kt | Built-in universal seeds — shortcuts: WhatsApp (wa.me), call, SMS, alarm, timer, YouTube search, Maps directions; screen: WhatsApp search, Gmail, Zomato. Inserted if missing, refreshed when the app ships new steps (counters kept). |
 | OsFingerprint.kt | Android API / version group, OEM skin, device, installed app versions. |
 | OsMigrationHandler.kt | On Android upgrade, marks old-version-group variants stale. |
 

@@ -2,7 +2,11 @@ package com.aura.agent
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.AlarmClock
 import android.graphics.Path
 import android.os.Bundle
 import android.util.Log
@@ -10,6 +14,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.aura.accessibility.NodeFinder
 import com.aura.accessibility.UIObserver
 import com.aura.data.model.ActionStep
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,10 +44,14 @@ data class StepResult(val ok: Boolean, val error: String? = null, val output: St
  */
 @Singleton
 class ActionExecutor @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val uiObserver: UIObserver,
     private val nodeFinder: NodeFinder
 ) {
     private var service: AccessibilityService? = null
+
+    /** Last app AURA launched: what the plan asked for → what actually opened. */
+    private var lastLaunch: Pair<String?, String?> = null to null
 
     fun bind(accessibilityService: AccessibilityService) {
         service = accessibilityService
@@ -79,9 +88,20 @@ class ActionExecutor @Inject constructor(
                 ActionStep.BACK         -> global(AccessibilityService.GLOBAL_ACTION_BACK)
                 ActionStep.HOME         -> global(AccessibilityService.GLOBAL_ACTION_HOME)
                 ActionStep.FIND_ELEMENT -> findElement(step.text, step.viewId)
-                ActionStep.WAIT         -> { delay((step.waitMs ?: 1000L).coerceIn(0L, 10_000L)); StepResult.OK }
+                // A wait is a maximum: it ends as soon as the screen has settled.
+                ActionStep.WAIT         -> {
+                    val max = (step.waitMs ?: 1000L).coerceIn(0L, 10_000L)
+                    uiObserver.waitForStable(quietMs = 600, minMs = minOf(600L, max), maxMs = max)
+                    StepResult.OK
+                }
                 ActionStep.CONFIRM_SEND -> StepResult.OK // gate handled by TaskManager
                 ActionStep.READ_TEXT    -> StepResult(true, output = readText(step.text))
+                ActionStep.VERIFY       -> verify(step.pkg, step.text)
+                ActionStep.DIAL         -> dial(step.number)
+                ActionStep.SMS          -> sms(step.number, step.inputText ?: step.message)
+                ActionStep.ALARM        -> alarm(step.time, step.message)
+                ActionStep.TIMER        -> timer(step.time, step.message)
+                ActionStep.OPEN_LINK    -> openLink(step.uri, step.pkg)
                 else -> StepResult.fail("I don't know how to do \"${step.action}\" yet.")
             }
         } catch (e: Exception) {
@@ -89,7 +109,8 @@ class ActionExecutor @Inject constructor(
             StepResult.fail("Something went wrong while doing ${step.action.replace('_', ' ')}.")
         }
         if (!result.ok) Log.w(TAG, "Step failed: ${step.action} → ${result.error}")
-        delay(300L) // Brief pause between steps for UI to settle
+        // Let the UI settle before the next step (ends early when the screen is quiet).
+        if (result.ok && step.action !in NO_SETTLE) uiObserver.waitForStable(quietMs = 300, minMs = 150, maxMs = 1500)
         return result
     }
 
@@ -112,7 +133,8 @@ class ActionExecutor @Inject constructor(
 
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         svc.startActivity(launch)
-        Log.i(TAG, "Opened app: ${launch.component?.packageName}")
+        lastLaunch = pkg to (launch.component?.packageName ?: launch.`package`)
+        Log.i(TAG, "Opened app: ${lastLaunch.second}")
         return StepResult.OK
     }
 
@@ -147,12 +169,10 @@ class ActionExecutor @Inject constructor(
             // Fall back to a real tap gesture at the node's position.
             val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
             if (!bounds.isEmpty && tapAt(bounds.exactCenterX(), bounds.exactCenterY())) {
-                delay(500L)
                 return StepResult.OK
             }
             return StepResult.fail("I found \"${text ?: viewId}\" but couldn't tap it.")
         }
-        delay(500L)
         return StepResult.OK
     }
 
@@ -291,7 +311,105 @@ class ActionExecutor @Inject constructor(
         return StepResult.fail("AURA's Accessibility service is off. Turn it on in Settings → Accessibility.")
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // Verification
+    // ──────────────────────────────────────────────────────────────
+
+    /**
+     * Pass when app [pkg] is in front (or the app AURA opened for [pkg]) and [text]
+     * is visible. Waits for the screen to catch up; fails with a readable reason.
+     */
+    suspend fun verify(pkg: String?, text: String?): StepResult {
+        if (pkg.isNullOrBlank() && text.isNullOrBlank()) return StepResult.OK
+        val deadline = System.currentTimeMillis() + VERIFY_TIMEOUT_MS
+        var foreground: String? = null
+        while (true) {
+            val root = service?.rootInActiveWindow ?: return noService()
+            foreground = root.packageName?.toString()
+            val pkgOk = pkg.isNullOrBlank() || foreground == pkg ||
+                (lastLaunch.first == pkg && foreground == lastLaunch.second)
+            val textOk = text.isNullOrBlank() || nodeFinder.findNode(root, text, null) != null
+            if (pkgOk && textOk) return StepResult.OK
+            if (System.currentTimeMillis() > deadline) break
+            delay(FIND_POLL_MS)
+        }
+        val what = listOfNotNull(
+            pkg?.takeIf { it.isNotBlank() && foreground != pkg }?.let { "the app ${it.substringAfterLast('.')}" },
+            text?.takeIf { it.isNotBlank() }?.let { "\"$it\" on the screen" }
+        ).joinToString(" and ")
+        return StepResult.fail("I did the steps but couldn't confirm it worked (expected $what).")
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Shortcuts — Android intents, no screen tapping
+    // ──────────────────────────────────────────────────────────────
+
+    private fun dial(number: String?): StepResult {
+        val n = number?.filter { it.isDigit() || it == '+' }?.takeIf { it.length >= 3 }
+            ?: return StepResult.fail("I need a phone number to call.")
+        return startIntent(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$n")), "the dialer")
+    }
+
+    private fun sms(number: String?, body: String?): StepResult {
+        val n = number?.filter { it.isDigit() || it == '+' }?.takeIf { it.length >= 3 }
+            ?: return StepResult.fail("I need a phone number to text.")
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$n"))
+        if (!body.isNullOrBlank()) intent.putExtra("sms_body", body)
+        return startIntent(intent, "the messaging app")
+    }
+
+    private fun alarm(time: String?, label: String?): StepResult {
+        val (h, m) = TimeParser.parseClock(time) ?: return StepResult.fail("I need a time like 07:30 for the alarm.")
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM)
+            .putExtra(AlarmClock.EXTRA_HOUR, h)
+            .putExtra(AlarmClock.EXTRA_MINUTES, m)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
+        return startIntent(intent, "the clock app")
+    }
+
+    private fun timer(time: String?, label: String?): StepResult {
+        val seconds = TimeParser.parseDuration(time)?.takeIf { it in 1..86_400 }
+            ?: return StepResult.fail("I need a length like 5 minutes for the timer.")
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
+            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (!label.isNullOrBlank()) intent.putExtra(AlarmClock.EXTRA_MESSAGE, label)
+        return startIntent(intent, "the clock app")
+    }
+
+    private fun openLink(uri: String?, pkg: String?): StepResult {
+        val link = uri?.trim()?.takeIf { it.isNotEmpty() } ?: return StepResult.fail("I need a link to open.")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
+        // Prefer the named app (e.g. YouTube, Maps) when it's installed.
+        if (!pkg.isNullOrBlank() && appContext.packageManager.getLaunchIntentForPackage(pkg) != null) {
+            intent.setPackage(pkg)
+        }
+        val result = startIntent(intent, "that link")
+        if (result.ok) lastLaunch = pkg to (intent.`package` ?: pkg)
+        return result
+    }
+
+    private fun startIntent(intent: Intent, what: String): StepResult = try {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        (service ?: appContext).startActivity(intent)
+        StepResult.OK
+    } catch (_: ActivityNotFoundException) {
+        StepResult.fail("No app on this phone can open $what.")
+    } catch (e: SecurityException) {
+        StepResult.fail("Android blocked opening $what.")
+    }
+
     private companion object {
-        val NO_SERVICE_NEEDED = setOf(ActionStep.WAIT, ActionStep.CONFIRM_SEND)
+        val NO_SERVICE_NEEDED = setOf(
+            ActionStep.WAIT, ActionStep.CONFIRM_SEND,
+            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK
+        )
+        const val VERIFY_TIMEOUT_MS = 5000L
+        /** Steps that don't change the screen, so there's nothing to wait for afterwards. */
+        val NO_SETTLE = setOf(
+            ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY, ActionStep.READ_TEXT,
+            ActionStep.FIND_ELEMENT, ActionStep.ALARM, ActionStep.TIMER
+        )
     }
 }
