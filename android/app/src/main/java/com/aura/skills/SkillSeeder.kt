@@ -115,6 +115,8 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.OPEN_LINK, pkg = "com.whatsapp",
                         uri = "https://wa.me/{contact_number_digits}?text={message_text}"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 2500L),
+                    // The chat must be open (message box on screen) before anything is sent
+                    ActionStep(action = ActionStep.FIND_ELEMENT, viewId = "com.whatsapp:id/entry"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Send \"{message_text}\" to {contact_name} on WhatsApp?", risk = "HIGH"),
                     ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send", text = "Send"),
@@ -137,12 +139,14 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.OPEN_APP, pkg = "com.whatsapp", text = "WhatsApp"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 2000L),
                     ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/menuitem_search", text = "Search"),
-                    ActionStep(action = ActionStep.TYPE, inputText = "{contact_name}"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1000L),
+                    // Type the name into the SEARCH box (named), never into whatever is focused
+                    ActionStep(action = ActionStep.TYPE, inputText = "{contact_name}", text = "Search"),
+                    ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
+                    // Tap the RESULT (tap skips text boxes), then make sure the chat opened
                     ActionStep(action = ActionStep.TAP, text = "{contact_name}"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1000L),
-                    ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/entry"),
-                    ActionStep(action = ActionStep.TYPE, inputText = "{message_text}"),
+                    ActionStep(action = ActionStep.FIND_ELEMENT, viewId = "com.whatsapp:id/entry"),
+                    // Type the message into the chat's message box only
+                    ActionStep(action = ActionStep.TYPE, inputText = "{message_text}", viewId = "com.whatsapp:id/entry"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Send \"{message_text}\" to {contact_name} on WhatsApp?", risk = "HIGH"),
                     ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send"),

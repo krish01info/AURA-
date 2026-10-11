@@ -51,14 +51,16 @@ private const val PREF_WAKE_ENABLED = "wake_word_enabled"
  *        │                                     ▲
  *        └─ "Hey AURA, open YouTube" ──────────┘  (command in the same sentence)
  *
- *   Task progress, Allow/Deny approvals, and the result are shown in
- *   [AssistantOverlay]; HIGH-risk steps can also be approved by voice
- *   ("yes" / "no"). "Hey AURA, stop" cancels a running task.
+ *   The popup shows live text while you speak, then what was heard (with Cancel),
+ *   task progress, Allow/Deny approvals (tap or "yes"/"no") and the result.
+ *   A running task is stopped with Cancel in the popup or Stop in the notification.
  *
  * Wake detection uses Android's SpeechRecognizer in a loop that restarts only after
- * each session ends (result or error). Note: some phones play a short sound each
- * time recognition starts, and the loop uses more battery than a dedicated
- * wake-word engine (Picovoice Porcupine is the planned upgrade).
+ * each session ends. Smoothness measures: on-device recognizer when available
+ * (falls back to online), system start-beeps muted on restarts (never while music
+ * plays), no listening while a task runs (it would hear AURA and the app's audio),
+ * one retry when nothing was heard. A dedicated wake-word engine (Picovoice
+ * Porcupine) is still the planned upgrade for battery.
  *
  * Start it with the intents built by the companion helpers:
  *  - [startWake]  — turn on always-listening (persisted)
@@ -90,6 +92,13 @@ class WakeWordService : Service() {
     private var tone: ToneGenerator? = null
     private var started = false
 
+    /** Use Android's on-device recognizer for the wake loop (faster, offline, fewer beeps). */
+    private var useOnDevice = false
+    private var audioManager: AudioManager? = null
+    /** Streams we muted to hide the recognizer's start beep (restored right after). */
+    private val mutedStreams = mutableSetOf<Int>()
+    private var unmuteJob: Job? = null
+
     // ──────────────────────────────────────────────────────────────
     // Lifecycle
     // ──────────────────────────────────────────────────────────────
@@ -112,6 +121,10 @@ class WakeWordService : Service() {
         started = true
         wakeEnabled = isWakeEnabled(this)
         tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 60) } catch (_: Exception) { null }
+        audioManager = getSystemService(AudioManager::class.java)
+        useOnDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        Log.i(TAG, "Wake recognizer: ${if (useOnDevice) "on-device" else "online"}")
 
         // Follow the task the assistant started, to drive the popup.
         scope.launch {
@@ -149,6 +162,7 @@ class WakeWordService : Service() {
         mode = Mode.IDLE
         flowJob?.cancel()
         hideJob?.cancel()
+        restoreEarcons()
         destroyWakeRecognizer()
         overlay.hide()
         tone?.release()
@@ -181,11 +195,13 @@ class WakeWordService : Service() {
             return
         }
         wakeHeardInPartial = false
-        val recognizer = wakeRecognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also {
+        val recognizer = wakeRecognizer ?: createWakeRecognizer().also {
             it.setRecognitionListener(wakeListener)
             wakeRecognizer = it
         }
         try {
+            // Background restarts happen every few seconds — hide the system "listening" beep.
+            muteEarconsBriefly()
             recognizer.startListening(recognizerIntent(partial = true))
         } catch (e: Exception) {
             Log.e(TAG, "startListening failed: ${e.message}")
@@ -264,6 +280,14 @@ class WakeWordService : Service() {
                 return
             }
             if (mode != Mode.WAKE && mode != Mode.TASK) return
+            if (useOnDevice && error in ON_DEVICE_UNSUPPORTED_ERRORS) {
+                // On-device model missing for this language — switch to the online recognizer.
+                Log.w(TAG, "On-device recognizer unavailable (error $error) — using online")
+                useOnDevice = false
+                destroyWakeRecognizer()
+                scheduleWake(RESTART_MS)
+                return
+            }
             val delayMs = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH,
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> RESTART_MS
@@ -294,10 +318,11 @@ class WakeWordService : Service() {
     // Command capture → task
     // ──────────────────────────────────────────────────────────────
 
-    /** Pop up, beep and listen for one command. */
+    /** Pop up, beep and listen for one command (with live text and one retry). */
     private fun startCommandCapture(alreadyBeeped: Boolean = false) {
         if (taskManager.isBusy && mode == Mode.TASK) {
-            overlay.show("I'm still working on the last task", "Say \"Hey AURA, stop\" to cancel it.")
+            overlay.show("I'm still working on the last task", "Tap Stop in AURA's notification to cancel it.",
+                AssistantOverlay.Actions(onCancel = { taskManager.emergencyStop() }))
             return
         }
         mode = Mode.COMMAND
@@ -310,10 +335,23 @@ class WakeWordService : Service() {
                 return@launch
             }
             overlay.show("Listening…", "Say what you want me to do.", actionsClose())
-            if (!alreadyBeeped) beep()
-            delay(350) // let the wake recognizer release the mic
+            if (!alreadyBeeped) {
+                beep()
+                delay(200)  // let our beep finish before the mic opens
+            } else {
+                delay(120)  // just enough for the wake recognizer to release the mic
+            }
 
-            val text = voiceManager.recognizeSpeech()?.trim()
+            var text: String? = null
+            for (attempt in 1..2) {
+                muteEarconsBriefly() // we already beeped; skip the system's second beep
+                text = voiceManager.recognizeSpeech { partial ->
+                    overlay.show("Listening…", "\u201C$partial\u201D", actionsClose())
+                }?.trim()
+                if (!text.isNullOrBlank() || attempt == 2) break
+                // Nothing heard (user started late) — one more try before giving up.
+                overlay.show("Still listening…", "Say what you want me to do.", actionsClose())
+            }
             val command = text?.let { extractCommand(it) ?: it }?.trim()
             if (command.isNullOrBlank()) {
                 overlay.show("Sorry, I didn't catch that", null,
@@ -342,11 +380,12 @@ class WakeWordService : Service() {
             overlay.show("\u201C$command\u201D", "Working on it…", AssistantOverlay.Actions(onClose = { closePanel() }))
             lastHandledState = null
             taskManager.reset()
+            updateNotification("Working on: $command")
             taskManager.execute(command)
             // execute() can fail synchronously (e.g. setup problem) — handle that now.
             onTaskState(taskManager.state.value)
-            // Keep listening in the background so "Hey AURA, stop" works mid-task.
-            scheduleWake(1500)
+            // The wake listener stays OFF during a task: it would hear AURA's own voice and
+            // the target app's audio. Stop with the popup / notification instead.
         }
     }
 
@@ -358,7 +397,8 @@ class WakeWordService : Service() {
         if (mode != Mode.TASK || state === lastHandledState) return
         lastHandledState = state
         when (state) {
-            is TaskState.Planning -> overlay.show("Thinking…", null, AssistantOverlay.Actions(onClose = { closePanel() }))
+            is TaskState.Planning -> overlay.show("Thinking…", null,
+                AssistantOverlay.Actions(onCancel = { taskManager.emergencyStop() }))
             is TaskState.Executing -> overlay.showWorking(
                 "Step ${state.stepIndex + 1} of ${state.totalSteps}",
                 describe(state.currentStep.action, state.currentStep.text ?: state.currentStep.pkg)
@@ -428,6 +468,7 @@ class WakeWordService : Service() {
         overlay.hide()
         if (taskManager.isBusy) return // task still running; keep TASK mode
         lastHandledState = null
+        updateNotification("Say \"Hey AURA\" to activate")
         destroyWakeRecognizer() // a fresh session avoids "recognizer busy"
         if (wakeEnabled) {
             mode = Mode.WAKE
@@ -464,7 +505,51 @@ class WakeWordService : Service() {
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, partial)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, useOnDevice)
+            // "Hey AURA … open YouTube" with a short pause stays in one session.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
+
+    private fun createWakeRecognizer(): SpeechRecognizer =
+        if (useOnDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(this)
+        }
+
+    /**
+     * Hide the recognizer's start beep: mute the system stream (and the media stream,
+     * but only when nothing is playing, so the user's music never drops out) for a
+     * moment, then restore exactly what we muted.
+     */
+    private fun muteEarconsBriefly() {
+        val am = audioManager ?: return
+        try {
+            val streams = mutableListOf(AudioManager.STREAM_SYSTEM)
+            if (!am.isMusicActive) streams += AudioManager.STREAM_MUSIC
+            for (st in streams) {
+                if (st !in mutedStreams && !am.isStreamMute(st)) {
+                    am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0)
+                    mutedStreams += st
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Couldn't mute earcons: ${e.message}")
+        }
+        unmuteJob?.cancel()
+        unmuteJob = scope.launch {
+            delay(EARCON_MUTE_MS)
+            restoreEarcons()
+        }
+    }
+
+    private fun restoreEarcons() {
+        val am = audioManager ?: return
+        for (st in mutedStreams.toList()) {
+            try { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0) } catch (_: Exception) { }
+        }
+        mutedStreams.clear()
+    }
 
     private fun beep() {
         try { tone?.startTone(ToneGenerator.TONE_PROP_ACK, 150) } catch (_: Exception) { }
@@ -516,6 +601,10 @@ class WakeWordService : Service() {
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(open)
             .addAction(0, "Talk", talk)
+            .addAction(0, "Stop", PendingIntent.getService(
+                this, 3, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP_TASK),
+                PendingIntent.FLAG_IMMUTABLE
+            ))
             .addAction(0, "Turn off", off)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -533,6 +622,10 @@ class WakeWordService : Service() {
         const val ACTION_TURN_OFF   = "com.aura.assistant.TURN_OFF"
 
         private const val RESTART_MS = 250L
+        /** How long system sounds stay muted around a recognizer start. */
+        private const val EARCON_MUTE_MS = 700L
+        /** SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED / ERROR_LANGUAGE_UNAVAILABLE (API 31). */
+        private val ON_DEVICE_UNSUPPORTED_ERRORS = setOf(12, 13)
         /** How long the heard command is shown (with Cancel) before it runs. */
         private const val CONFIRM_HEARD_MS = 1300L
 
