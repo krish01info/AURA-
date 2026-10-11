@@ -163,7 +163,17 @@ class VoiceManager @Inject constructor(
      *
      * Uses Android SpeechRecognizer. Call from the main thread.
      */
-    suspend fun recognizeSpeech(onPartial: ((String) -> Unit)? = null): String? = suspendCancellableCoroutine { cont ->
+    suspend fun recognizeSpeech(onPartial: ((String) -> Unit)? = null): String? =
+        recognizeAlternatives(onPartial, maxResults = 1)?.firstOrNull()
+
+    /**
+     * Like [recognizeSpeech] but returns up to [maxResults] guesses, best first —
+     * a short "no" is often heard as "now" or "know" in the top guess only.
+     */
+    suspend fun recognizeAlternatives(
+        onPartial: ((String) -> Unit)? = null,
+        maxResults: Int = 3
+    ): List<String>? = suspendCancellableCoroutine { cont ->
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Log.w(TAG, "SpeechRecognizer not available")
             cont.resume(null)
@@ -186,11 +196,11 @@ class VoiceManager @Inject constructor(
 
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val transcript = matches?.firstOrNull()
-                Log.i(TAG, "✅ Speech recognised: \"$transcript\"")
+                    ?.filter { it.isNotBlank() }
+                Log.i(TAG, "✅ Speech recognised: $matches")
                 _isListening.value = false
                 recognizer.destroy()
-                if (cont.isActive) cont.resume(transcript)
+                if (cont.isActive) cont.resume(matches?.takeIf { it.isNotEmpty() })
             }
 
             override fun onError(error: Int) {
@@ -216,7 +226,7 @@ class VoiceManager @Inject constructor(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoicePrefs.commandLanguageTag(context))
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, maxResults)
             // Live text for the popup, and don't cut the user off on a short pause.
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, onPartial != null)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)

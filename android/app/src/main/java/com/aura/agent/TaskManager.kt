@@ -589,7 +589,7 @@ class TaskManager @Inject constructor(
         const val MAX_RECOVERIES = 2
         /** Plans with these finish outside any app screen — no automatic "app in front" check. */
         val NO_AUTO_VERIFY = setOf(
-            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
+            ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
             ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
         )
         const val ACCESSIBILITY_OFF =

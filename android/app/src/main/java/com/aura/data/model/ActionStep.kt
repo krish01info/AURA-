@@ -89,6 +89,7 @@ data class ActionStep(
 
         // Shortcuts — launched as Android intents
         const val DIAL              = "dial"       // opens the dialer with [number] (doesn't call)
+        const val CALL              = "call"       // places a call to [number] (dialer + Call button without the permission)
         const val SMS               = "sms"        // opens SMS composer: [number], [inputText]
         const val ALARM             = "alarm"      // sets an alarm at [time], label [message]
         const val TIMER             = "timer"      // starts a timer for [time], label [message]
@@ -108,6 +109,35 @@ data class ActionStep(
 
         /** Read recent notifications aloud: optional app [pkg], optional person [text]. Needs notification access. */
         const val READ_NOTIFICATIONS = "read_notifications"
+
+        /** Every action this app version can run. Shortcuts using anything else are skipped (newer file, older app). */
+        val KNOWN_ACTIONS = setOf(
+            OPEN_APP,
+            TAP,
+            TYPE,
+            SWIPE,
+            SCROLL,
+            BACK,
+            HOME,
+            FIND_ELEMENT,
+            WAIT,
+            CONFIRM_SEND,
+            READ_TEXT,
+            PRESS_KEY,
+            CLARIFY,
+            VERIFY,
+            DIAL,
+            CALL,
+            SMS,
+            ALARM,
+            TIMER,
+            OPEN_LINK,
+            INTENT,
+            MEDIA,
+            NOW_PLAYING,
+            REPLY,
+            READ_NOTIFICATIONS
+        )
     }
 }
 

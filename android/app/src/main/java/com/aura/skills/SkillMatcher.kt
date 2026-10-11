@@ -50,6 +50,27 @@ object SkillMatcher {
         "from", "say", "saying", "aura", "hey"
     )
 
+    /** Different spellings of the same app name, so patterns don't have to list them all. */
+    private val ALIASES = listOf(
+        Regex("\\b(?:google\\s+)?play[\\s-]?store\\b", RegexOption.IGNORE_CASE) to "play store",
+        Regex("\\bwhats\\s+app\\b", RegexOption.IGNORE_CASE) to "whatsapp",
+        Regex("\\byou\\s+tube\\b", RegexOption.IGNORE_CASE) to "youtube"
+    )
+
+    /**
+     * A second command joined on with "and"/"then": "open whatsapp **and send** hi to rahul".
+     * A slot that swallows one would turn a two-part task into "open whatsapp" — see [matchOne].
+     */
+    private val CHAINED_ACTION = Regex(
+        "\\b(?:and|then|also|after that)\\s+(?:then\\s+)?(?:open|send|message|msg|text|search|find|look|call|dial|" +
+            "play|type|write|tap|click|press|go|reply|book|order|pay|share|post|check|show|turn|set|select|" +
+            "download|install|start|stop|scroll|read|tell|ask|add|create|make|take|record|buy)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Free-text slots (a message, a note) may legitimately contain "and call…". */
+    private fun isFreeText(slot: String) = "message" in slot || "text" in slot || "content" in slot
+
     /**
      * Lowercase, drop punctuation and filler words, collapse spaces.
      * Slots like `{contact_name}` survive so patterns can be normalized too.
@@ -64,6 +85,7 @@ object SkillMatcher {
             .replace(Regex("(?<![\\p{L}\\p{N}])[.'-]|[.'-](?![\\p{L}\\p{N}])"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+        for ((alias, canonical) in ALIASES) s = s.replace(alias, canonical)
         // Strip filler repeatedly ("hey aura please open youtube")
         while (true) {
             val next = s.replace(LEADING_FILLER, "").replace(TRAILING_FILLER, "").trim()
@@ -109,11 +131,11 @@ object SkillMatcher {
             append('^')
             var last = 0
             for (m in SLOT.findAll(pattern)) {
-                append(Regex.escape(pattern.substring(last, m.range.first)))
+                append(literalRegex(pattern.substring(last, m.range.first)))
                 append("(.+?)")
                 last = m.range.last + 1
             }
-            append(Regex.escape(pattern.substring(last)))
+            append(literalRegex(pattern.substring(last)))
             append('$')
         }.toRegex()
         val lower = cleanedGoal.lowercase()
@@ -125,11 +147,29 @@ object SkillMatcher {
             name to source.substring(range.first, range.last + 1).trim()
         }
         if (values.any { it.second.isEmpty() }) return null
+        // "open {app}" must not eat "open whatsapp and send hi to rahul": that's two tasks,
+        // and running only the first one looks like "AURA just opens the app".
+        if (!CHAINED_ACTION.containsMatchIn(pattern) &&
+            values.any { (name, value) -> !isFreeText(name) && CHAINED_ACTION.containsMatchIn(value) }
+        ) return null
         // The same slot used twice must have the same value both times.
         val grouped = values.groupBy({ it.first }, { it.second })
         if (grouped.values.any { vs -> vs.map { it.lowercase() }.distinct().size > 1 }) return null
         return grouped.mapValues { it.value.first() }
     }
+
+    /**
+     * Regex for the fixed words of a pattern. "on"/"in" are interchangeable and may be
+     * followed by "the", so "search {q} on play store" also matches "…in the play store".
+     */
+    private fun literalRegex(literal: String): String =
+        literal.split(' ').joinToString(" ") { word ->
+            when (word) {
+                "" -> ""
+                "on", "in" -> "(?:on|in)(?: the)?"
+                else -> Regex.escape(word)
+            }
+        }
 
     private fun literalLength(pattern: String): Int =
         pattern.replace(SLOT, "").replace(" ", "").length

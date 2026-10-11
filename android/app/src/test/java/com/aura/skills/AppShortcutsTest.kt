@@ -16,14 +16,7 @@ class AppShortcutsTest {
 
     private val file = SkillSeeder.parse(File("src/main/assets/app_shortcuts.json").readText())
 
-    private val knownActions = setOf(
-        ActionStep.OPEN_APP, ActionStep.TAP, ActionStep.TYPE, ActionStep.SWIPE, ActionStep.SCROLL,
-        ActionStep.BACK, ActionStep.HOME, ActionStep.FIND_ELEMENT, ActionStep.WAIT,
-        ActionStep.CONFIRM_SEND, ActionStep.READ_TEXT, ActionStep.PRESS_KEY, ActionStep.CLARIFY,
-        ActionStep.VERIFY, ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER,
-        ActionStep.OPEN_LINK, ActionStep.INTENT, ActionStep.MEDIA, ActionStep.NOW_PLAYING,
-        ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
-    )
+    private val knownActions = ActionStep.KNOWN_ACTIONS
 
     @Test fun `file parses and has skills`() {
         assertTrue(file.version >= 1)

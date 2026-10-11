@@ -15,6 +15,7 @@ import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -86,6 +87,15 @@ class WakeWordService : Service() {
     private var flowJob: Job? = null
     private var hideJob: Job? = null
     private var errorStreak = 0
+    /** Wake sessions that ended almost at once with "nothing heard" — the mic flickering on/off. */
+    private var fastFailStreak = 0
+    private var sessionStartedAt = 0L
+
+    /**
+     * Set when the user said "no" to an approval by voice: null = not pending,
+     * "" = ask what to do instead, else = the correction they already said ("no, call Rohit").
+     */
+    private var pendingCorrection: String? = null
 
     /** Last task state handled (identity), so duplicates are ignored. */
     private var lastHandledState: TaskState? = null
@@ -202,6 +212,7 @@ class WakeWordService : Service() {
         try {
             // Background restarts happen every few seconds — hide the system "listening" beep.
             muteEarconsBriefly()
+            sessionStartedAt = SystemClock.elapsedRealtime()
             recognizer.startListening(recognizerIntent(partial = true))
         } catch (e: Exception) {
             Log.e(TAG, "startListening failed: ${e.message}")
@@ -220,6 +231,29 @@ class WakeWordService : Service() {
             delay(delayMs)
             if (mode == Mode.WAKE || mode == Mode.TASK) startWake()
         }
+    }
+
+    /**
+     * Delay before the next wake session after one that heard nothing. Some recognizers
+     * (often the on-device one) end a session instantly, so restarting right away turns the
+     * mic on and off several times a second. Those get a growing pause, and after a few
+     * the online recognizer is used instead.
+     */
+    private fun quietRestartDelay(): Long {
+        val lasted = SystemClock.elapsedRealtime() - sessionStartedAt
+        if (lasted >= FAST_FAIL_MS) {
+            fastFailStreak = 0
+            return RESTART_MS
+        }
+        fastFailStreak++
+        if (useOnDevice && fastFailStreak >= FAST_FAILS_BEFORE_ONLINE) {
+            Log.w(TAG, "On-device recognizer keeps ending at once — using online")
+            useOnDevice = false
+            destroyWakeRecognizer()
+            fastFailStreak = 0
+            return RESTART_MS
+        }
+        return (RESTART_MS shl fastFailStreak.coerceAtMost(5)).coerceAtMost(MAX_QUIET_BACKOFF_MS)
     }
 
     private fun destroyWakeRecognizer() {
@@ -245,6 +279,7 @@ class WakeWordService : Service() {
 
         override fun onResults(results: Bundle?) {
             errorStreak = 0
+            fastFailStreak = 0
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
             Log.d(TAG, "Heard: $texts")
 
@@ -290,7 +325,7 @@ class WakeWordService : Service() {
             }
             val delayMs = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH,
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> RESTART_MS
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> quietRestartDelay()
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                     updateNotification("Microphone permission needed — open AURA to allow it")
                     return
@@ -319,7 +354,12 @@ class WakeWordService : Service() {
     // ──────────────────────────────────────────────────────────────
 
     /** Pop up, beep and listen for one command (with live text and one retry). */
-    private fun startCommandCapture(alreadyBeeped: Boolean = false) {
+    private fun startCommandCapture(
+        alreadyBeeped: Boolean = false,
+        title: String = "Listening…",
+        hint: String = "Say what you want me to do.",
+        afterSpeech: Boolean = false
+    ) {
         if (taskManager.isBusy && mode == Mode.TASK) {
             overlay.show("I'm still working on the last task", "Tap Stop in AURA's notification to cancel it.",
                 AssistantOverlay.Actions(onCancel = { taskManager.emergencyStop() }))
@@ -334,12 +374,13 @@ class WakeWordService : Service() {
                 showThenResume("I need microphone permission", "Open AURA and allow the microphone.")
                 return@launch
             }
-            overlay.show("Listening…", "Say what you want me to do.", actionsClose())
+            overlay.show(title, hint, actionsClose())
+            if (afterSpeech) waitForSpeechToFinish() // don't record AURA's own voice
             if (!alreadyBeeped) {
                 beep()
                 delay(200)  // let our beep finish before the mic opens
             } else {
-                delay(120)  // just enough for the wake recognizer to release the mic
+                delay(250)  // let the wake recognizer release the mic (else "recognizer busy")
             }
 
             var text: String? = null
@@ -353,6 +394,10 @@ class WakeWordService : Service() {
                 overlay.show("Still listening…", "Say what you want me to do.", actionsClose())
             }
             val command = text?.let { extractCommand(it) ?: it }?.trim()
+            if (!command.isNullOrBlank() && afterSpeech && ApprovalParser.isJustNo(command)) {
+                closePanel() // "no" again: nothing more to do
+                return@launch
+            }
             if (command.isNullOrBlank()) {
                 overlay.show("Sorry, I didn't catch that", null,
                     AssistantOverlay.Actions(onTalk = { startCommandCapture() }, onClose = { closePanel() }))
@@ -405,7 +450,19 @@ class WakeWordService : Service() {
             )
             is TaskState.WaitingForUser -> askApproval(state)
             is TaskState.Completed -> finishTask("Done", null, 2500)
-            is TaskState.Failed -> finishTask("Couldn't finish", state.reason, 7000)
+            is TaskState.Failed -> {
+                val correction = pendingCorrection
+                pendingCorrection = null
+                when {
+                    correction == null -> finishTask("Couldn't finish", state.reason, 7000)
+                    correction.isNotBlank() -> runCommand(correction)
+                    else -> startCommandCapture(
+                        title = "Okay, I won't do that",
+                        hint = "What should I do instead?",
+                        afterSpeech = true
+                    )
+                }
+            }
             is TaskState.Cancelled -> finishTask("Stopped", null, 1500)
             else -> {}
         }
@@ -424,23 +481,38 @@ class WakeWordService : Service() {
             return
         }
 
-        overlay.show("Allow this?", "$body\n\nSay \"yes\" or \"no\".", AssistantOverlay.Actions(
+        val buttons = AssistantOverlay.Actions(
             onDeny = { state.onDeny() },
             onAllow = { scope.launch { state.onAllow() } }
-        ))
-        // Also accept a spoken yes/no.
+        )
+        overlay.show("Allow this?", "$body\n\nSay \"yes\" or \"no\".", buttons)
+        // Also accept a spoken yes/no — a few tries, so one mishearing doesn't leave it stuck.
         destroyWakeRecognizer()
         flowJob?.cancel()
         flowJob = scope.launch {
             waitForSpeechToFinish()
-            val answer = voiceManager.recognizeSpeech()?.lowercase(Locale.ROOT).orEmpty()
-            if (taskManager.state.value !== state) return@launch // already answered by tap
-            when {
-                NO_WORDS.any { Regex("\\b$it\\b").containsMatchIn(answer) } -> state.onDeny()
-                YES_WORDS.any { Regex("\\b$it\\b").containsMatchIn(answer) } -> state.onAllow()
-                else -> { /* unclear — leave the buttons up */ }
+            for (attempt in 1..APPROVAL_TRIES) {
+                if (taskManager.state.value !== state) return@launch // answered by tap
+                val heard = voiceManager.recognizeAlternatives(maxResults = 3).orEmpty()
+                if (taskManager.state.value !== state) return@launch
+                when (val answer = ApprovalParser.parse(heard)) {
+                    is ApprovalParser.Answer.No -> {
+                        Log.i(TAG, "Approval: no (correction=\"${answer.correction}\")")
+                        pendingCorrection = answer.correction
+                        state.onDeny()
+                        return@launch
+                    }
+                    ApprovalParser.Answer.Yes -> {
+                        state.onAllow()
+                        scheduleWake(800) // "Hey AURA, stop" still works while it finishes
+                        return@launch
+                    }
+                    null -> if (attempt < APPROVAL_TRIES) {
+                        overlay.show("Allow this?", "$body\n\nSorry, say \"yes\" or \"no\".", buttons)
+                    }
+                }
             }
-            scheduleWake(800)
+            overlay.show("Allow this?", "$body\n\nTap Allow or Deny.", buttons)
         }
     }
 
@@ -525,8 +597,11 @@ class WakeWordService : Service() {
     private fun muteEarconsBriefly() {
         val am = audioManager ?: return
         try {
-            val streams = mutableListOf(AudioManager.STREAM_SYSTEM)
-            if (!am.isMusicActive) streams += AudioManager.STREAM_MUSIC
+            // Only the media stream, and only when nothing (music or AURA's voice) is playing.
+            // STREAM_SYSTEM is tied to the ringer on many phones: muting it every few seconds
+            // flips vibrate/silent icons and can be refused (Do Not Disturb).
+            if (am.isMusicActive || voiceManager.isSpeaking.value) return
+            val streams = listOf(AudioManager.STREAM_MUSIC)
             for (st in streams) {
                 if (st !in mutedStreams && !am.isStreamMute(st)) {
                     am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0)
@@ -641,8 +716,11 @@ class WakeWordService : Service() {
         private val STOP_REGEX = Regex("^\\s*(stop|cancel|abort)\\b.*", RegexOption.IGNORE_CASE)
         private val BARE_STOP = setOf("stop", "cancel", "aura stop", "stop aura")
 
-        private val YES_WORDS = listOf("yes", "yeah", "yep", "confirm", "allow", "ok", "okay", "sure", "go ahead", "do it", "haan", "ha")
-        private val NO_WORDS = listOf("no", "nope", "cancel", "deny", "stop", "don't", "dont", "nahi", "mat")
+        private const val APPROVAL_TRIES = 3
+        /** A wake session shorter than this that heard nothing counts as a "fast fail". */
+        private const val FAST_FAIL_MS = 1500L
+        private const val FAST_FAILS_BEFORE_ONLINE = 4
+        private const val MAX_QUIET_BACKOFF_MS = 4000L
 
         /**
          * If [text] contains the wake phrase, returns what was said after it

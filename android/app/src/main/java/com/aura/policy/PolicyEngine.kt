@@ -55,6 +55,8 @@ class PolicyEngine @Inject constructor() {
         ActionStep.SMS,           // opens the composer, doesn't send
         ActionStep.ALARM,
         ActionStep.TIMER         -> RiskLevel.LOW
+        // MEDIUM — the user asked to call; the popup showed the name with Cancel before running.
+        ActionStep.CALL          -> RiskLevel.MEDIUM
         ActionStep.OPEN_LINK     -> if (isPayment(step)) RiskLevel.HIGH else RiskLevel.MEDIUM
         // Generic intents only open/prefill screens (allow-listed in ActionExecutor);
         // a UPI payment link still asks first — the payment app then asks for the PIN.

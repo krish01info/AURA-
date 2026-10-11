@@ -4,7 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
 import android.provider.AlarmClock
@@ -17,6 +19,7 @@ import com.aura.accessibility.NodeFinder
 import com.aura.accessibility.UIObserver
 import com.aura.data.model.ActionStep
 import com.aura.notifications.NotificationStore
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import javax.inject.Inject
@@ -104,6 +107,7 @@ class ActionExecutor @Inject constructor(
                 ActionStep.READ_TEXT    -> StepResult(true, output = readText(step.text))
                 ActionStep.VERIFY       -> verify(step.pkg, step.text)
                 ActionStep.DIAL         -> dial(step.number)
+                ActionStep.CALL         -> call(step.number)
                 ActionStep.SMS          -> sms(step.number, step.inputText ?: step.message)
                 ActionStep.ALARM        -> alarm(step.time, step.message)
                 ActionStep.TIMER        -> timer(step.time, step.message)
@@ -162,8 +166,15 @@ class ActionExecutor @Inject constructor(
         val apps = pm.queryIntentActivities(launcherIntent, 0)
         val labelled = apps.map { it to it.loadLabel(pm).toString().lowercase().replace(" ", "") }
 
+        // Exact label first, then close matches ("youtube" ↔ "youtubemusic"). A long phrase
+        // that merely contains an app name ("whatsappandsendhitorahul") is NOT a match.
         val match = labelled.firstOrNull { (_, label) -> label in wanted }
-            ?: labelled.firstOrNull { (_, label) -> wanted.any { label.contains(it) || it.contains(label) } }
+            ?: labelled.filter { (_, label) ->
+                label.length >= 3 && wanted.any { w ->
+                    (label.contains(w) && w.length >= 4) ||
+                        (w.contains(label) && w.length - label.length <= MAX_EXTRA_LABEL_CHARS)
+                }
+            }.maxByOrNull { it.second.length }
             ?: return null
         return pm.getLaunchIntentForPackage(match.first.activityInfo.packageName)
     }
@@ -385,6 +396,56 @@ class ActionExecutor @Inject constructor(
         return startIntent(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$n")), "the dialer")
     }
 
+    /**
+     * Place a call. With the "Phone calls" permission the call starts directly; without it
+     * the dialer opens with the number and its Call button is pressed through Accessibility.
+     */
+    private suspend fun call(number: String?): StepResult {
+        val n = number?.filter { it.isDigit() || it == '+' }?.takeIf { it.length >= 3 }
+            ?: return StepResult.fail("I need a phone number to call.")
+        val uri = Uri.parse("tel:" + Uri.encode(n))
+        val canCall = ContextCompat.checkSelfPermission(appContext, Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (canCall) return startIntent(Intent(Intent.ACTION_CALL, uri), "the phone app")
+
+        val opened = startIntent(Intent(Intent.ACTION_DIAL, uri), "the dialer")
+        if (!opened.ok) return opened
+        if (service == null) return StepResult.fail(NEEDS_CALL_PERMISSION)
+        val button = waitForCallButton() ?: return StepResult.fail(NEEDS_CALL_PERMISSION)
+        val clickable = nodeFinder.findClickableAncestorOrSelf(button)
+        if (clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return StepResult.OK
+        val bounds = android.graphics.Rect().also { button.getBoundsInScreen(it) }
+        return if (!bounds.isEmpty && tapAt(bounds.exactCenterX(), bounds.exactCenterY())) StepResult.OK
+            else StepResult.fail(NEEDS_CALL_PERMISSION)
+    }
+
+    /** The dialer's green Call button (ids/labels differ between Google, Samsung, Xiaomi…). */
+    private suspend fun waitForCallButton(): AccessibilityNodeInfo? {
+        val deadline = System.currentTimeMillis() + FIND_TIMEOUT_MS
+        while (true) {
+            val root = service?.rootInActiveWindow
+            if (root != null) findCallButton(root)?.let { return it }
+            if (System.currentTimeMillis() > deadline) return null
+            delay(FIND_POLL_MS)
+        }
+    }
+
+    private fun findCallButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var byLabel: AccessibilityNodeInfo? = null
+        fun walk(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+            if (node == null || depth > 40) return null
+            if (node.isVisibleToUser && node.isEnabled) {
+                val id = node.viewIdResourceName?.substringAfter(":id/")?.lowercase()
+                if (id != null && CALL_BUTTON_IDS.any { id == it }) return node
+                val label = (node.contentDescription ?: node.text)?.toString()?.trim()?.lowercase()
+                if (byLabel == null && label != null && label in CALL_BUTTON_LABELS) byLabel = node
+            }
+            for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)?.let { return it }
+            return null
+        }
+        return walk(root, 0) ?: byLabel
+    }
+
     private fun sms(number: String?, body: String?): StepResult {
         val n = number?.filter { it.isDigit() || it == '+' }?.takeIf { it.length >= 3 }
             ?: return StepResult.fail("I need a phone number to text.")
@@ -524,7 +585,7 @@ class ActionExecutor @Inject constructor(
     companion object {
         val NO_SERVICE_NEEDED = setOf(
             ActionStep.WAIT, ActionStep.CONFIRM_SEND,
-            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK,
+            ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK,
             ActionStep.INTENT, ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY,
             ActionStep.READ_NOTIFICATIONS
         )
@@ -546,6 +607,15 @@ class ActionExecutor @Inject constructor(
             return action in ALLOWED_INTENT_ACTIONS || action.startsWith("android.settings.")
         }
         const val VERIFY_TIMEOUT_MS = 5000L
+        private const val NEEDS_CALL_PERMISSION =
+            "I opened the dialer but couldn't press Call. Allow AURA to make phone calls (Settings → Apps → AURA → Permissions)."
+        private val CALL_BUTTON_IDS = setOf(
+            "dialpad_floating_action_button", "dialbutton", "dial_button", "call_button",
+            "dialpad_voice_call_button", "btn_call", "call", "dial_btn", "dialpad_call_button"
+        )
+        private val CALL_BUTTON_LABELS = setOf("call", "dial", "voice call", "make a call", "make voice call", "audio call")
+        /** "open youtube app" still finds YouTube; a whole sentence around an app name doesn't. */
+        private const val MAX_EXTRA_LABEL_CHARS = 6
         /** How long a tap may take before the screen visibly reacts. */
         const val TAP_EFFECT_TIMEOUT_MS = 2500L
         /** Steps that don't change the screen, so there's nothing to wait for afterwards. */

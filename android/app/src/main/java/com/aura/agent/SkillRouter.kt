@@ -209,7 +209,7 @@ class SkillRouter @Inject constructor(
         /** Skin + Android group + app version all match — nothing more specific exists. */
         const val EXACT = 90.0
         val SHORTCUT_ACTIONS = listOf(
-            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER,
+            ActionStep.OPEN_LINK, ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER,
             ActionStep.INTENT, ActionStep.MEDIA, ActionStep.REPLY
         )
     }

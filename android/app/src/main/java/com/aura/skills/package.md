@@ -46,5 +46,7 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 ## Rules
 - Never insert a `SkillPackEntity` by hand; use `SkillLearner.learn()` (or seeds).
 - A pattern must have fixed words and no adjacent slots (`{a} {b}`) — `SkillMatcher.isUsable`.
+- A slot never swallows a second command ("open {app}" doesn't match "open whatsapp **and send** hi"), except free-text slots (`*message*`, `*text*`, `*content*`).
+- In patterns "on"/"in" are interchangeable and may be followed by "the"; app spellings are unified (playstore → play store, you tube → youtube).
 - Changing the entity → bump `AURADatabase` version with an auto-migration (needs the old
   schema JSON in `android/app/schemas/`), and update `docs/cloud/supabase_skill_packs.sql`.

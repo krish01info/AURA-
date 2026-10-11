@@ -147,4 +147,26 @@ class SkillMatcherTest {
         assertEquals("lofi beats", spotify.first["query"])
         assertTrue(spotify.second > generic.second)
     }
+
+    @Test fun `a slot never swallows a second command`() {
+        val open = listOf("open {app_name}")
+        assertEquals(mapOf("app_name" to "whatsapp"), SkillMatcher.match("open whatsapp", open))
+        assertNull(SkillMatcher.match("open whatsapp and send hi to rahul", open))
+        assertNull(SkillMatcher.match("open youtube then search lofi", open))
+        assertNull(SkillMatcher.match("open youtube and then play lofi", open))
+        // "and" inside a name/query is fine when no action follows it.
+        assertEquals(mapOf("query" to "rock and roll"), SkillMatcher.match("play rock and roll", listOf("play {query}")))
+    }
+
+    @Test fun `a message may contain and plus a verb`() {
+        val p = SkillMatcher.match("send I will come and call you later to Rahul on whatsapp", whatsappPatterns)
+        assertEquals("I will come and call you later", p!!["message_text"])
+    }
+
+    @Test fun `on and in are interchangeable and the is optional`() {
+        val play = listOf("find {query} on play store")
+        assertEquals(mapOf("query" to "instagram"), SkillMatcher.match("find instagram in the play store", play))
+        assertEquals(mapOf("query" to "instagram"), SkillMatcher.match("find instagram on Playstore", play))
+        assertEquals(mapOf("query" to "zomato"), SkillMatcher.match("find zomato on google play store", play))
+    }
 }
