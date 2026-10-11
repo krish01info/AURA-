@@ -10,6 +10,7 @@ import com.aura.llm.GeminiClient
 import com.aura.llm.GroqClient
 import com.aura.llm.LlmException
 import com.aura.llm.Plan
+import com.aura.llm.PlannerPrompt
 import com.aura.memory.MemoryManager
 import com.aura.policy.AppPermissionManager
 import com.aura.policy.AnomalyDetector
@@ -33,6 +34,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -74,9 +78,11 @@ class TaskManager @Inject constructor(
     private val memoryManager: MemoryManager,
     private val injectionDefender: PromptInjectionDefender,
     private val anomalyDetector: AnomalyDetector,
-    private val permissionManager: AppPermissionManager
+    private val permissionManager: AppPermissionManager,
+    private val contactResolver: ContactResolver
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val patternJson = Json { ignoreUnknownKeys = true }
     private var currentJob: Job? = null
 
     /** Observable state — the UI and the assistant popup collect this. */
@@ -97,8 +103,16 @@ class TaskManager @Inject constructor(
     /** Outcome of running a list of steps. */
     private sealed class RunOutcome {
         data object Success : RunOutcome()
-        data class StepFailed(val reason: String) : RunOutcome()
+        /** Step [index] failed; steps before it worked. */
+        data class StepFailed(val reason: String, val index: Int) : RunOutcome()
         data object Stopped : RunOutcome() // denied, cancelled or already failed
+    }
+
+    /** Result of a run including recoveries: [executed] = every step that worked, in order. */
+    private sealed class FlowResult {
+        data class Done(val executed: List<ActionStep>, val recovered: Boolean) : FlowResult()
+        data class Failed(val reason: String) : FlowResult()
+        data object Stopped : FlowResult()
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -216,51 +230,62 @@ class TaskManager @Inject constructor(
 
             // 1. Stored skill: RAM → disk → Room → cloud. No LLM call when found.
             val match = skillRouter.findSkill(goal)
+            match?.question?.let { fail(taskId, goal, it); return }
+
+            val plan: Plan
+            val runParams: Map<String, String>
+            val firstSteps: List<ActionStep>
             if (match != null) {
                 Log.i(TAG, "Using stored skill ${match.skill.skillId} from ${match.layer} (${match.steps.size} steps)")
-                when (val outcome = runStepsInternal(taskId, goal, match.steps)) {
-                    RunOutcome.Success -> {
+                plan = Plan(
+                    steps = emptyList(),
+                    app = match.skill.appPackage,
+                    category = match.skill.intentCategory,
+                    action = match.skill.intentAction,
+                    params = match.spokenParams,
+                    patterns = decodePatterns(match.skill.phrasePatterns)
+                )
+                runParams = match.params
+                firstSteps = match.steps
+            } else {
+                // 2. LLM plan (Groq → Gemini) — only when no stored skill fits
+                plan = planWithLlm(goal)
+                val clarify = plan.steps.firstOrNull { it.action == ActionStep.CLARIFY }
+                if (clarify != null) {
+                    fail(taskId, goal, clarify.clarification ?: "Can you say that more specifically?")
+                    return
+                }
+                val resolved = contactResolver.enrich(plan.params)
+                resolved.question?.let { fail(taskId, goal, it); return }
+                runParams = resolved.params
+                val filled = SkillMatcher.fill(plan.steps, runParams)
+                if (filled == null) {
+                    fail(taskId, goal, "I couldn't plan that properly. Please try saying it another way.")
+                    return
+                }
+                firstSteps = withVerify(filled)
+                Log.i(TAG, "Plan ready — ${firstSteps.size} steps: ${firstSteps.map { it.action }}")
+            }
+
+            // 3. Run, recovering from failed steps by re-planning from the current screen.
+            when (val result = runWithRecovery(taskId, goal, firstSteps, runParams)) {
+                is FlowResult.Done -> {
+                    finishSuccess(taskId, goal, result.executed)
+                    if (match != null && !result.recovered) {
                         scope.launch { skillUpdater.recordSuccess(match.skill.skillId) }
-                        return
-                    }
-                    RunOutcome.Stopped -> return
-                    is RunOutcome.StepFailed -> {
-                        // Self-heal: record the failure, then re-plan with the LLM once.
-                        // The new plan is saved as this phone's variant (see SkillLearner).
-                        Log.w(TAG, "Stored skill failed (${outcome.reason}) — re-planning with LLM")
-                        scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
-                        voiceManager.speak("That didn't work. Let me try another way.", flush = false)
-                        _state.value = TaskState.Planning
+                    } else {
+                        // New plan, or a stored skill that needed fixing: save the path that
+                        // actually worked as this phone's variant (values → {slots}).
+                        if (match != null) scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
+                        val template = SkillMatcher.templatize(result.executed, runParams)
+                        scope.launch { skillLearner.learn(goal, plan, template) }
                     }
                 }
-            }
-
-            // 2. LLM plan (Groq → Gemini) — only when no stored skill fits
-            val plan = planWithLlm(goal)
-
-            val clarify = plan.steps.firstOrNull { it.action == ActionStep.CLARIFY }
-            if (clarify != null) {
-                fail(taskId, goal, clarify.clarification ?: "Can you say that more specifically?")
-                return
-            }
-
-            // Steps to run = template with this goal's values filled in.
-            // Template to save = the same steps with values turned back into {slot}s.
-            val steps = SkillMatcher.fill(plan.steps, plan.params)
-            if (steps == null) {
-                fail(taskId, goal, "I couldn't plan that properly. Please try saying it another way.")
-                return
-            }
-            val template = SkillMatcher.templatize(steps, plan.params)
-
-            Log.i(TAG, "Plan ready — ${steps.size} steps: ${steps.map { it.action }}")
-            when (val outcome = runStepsInternal(taskId, goal, steps)) {
-                RunOutcome.Success -> {
-                    // Only now is the plan known to work — save it as a skill for this phone.
-                    scope.launch { skillLearner.learn(goal, plan, template) }
+                is FlowResult.Failed -> {
+                    if (match != null) scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
+                    fail(taskId, goal, result.reason)
                 }
-                is RunOutcome.StepFailed -> fail(taskId, goal, outcome.reason)
-                RunOutcome.Stopped -> { /* state already set */ }
+                FlowResult.Stopped -> { /* state already set */ }
             }
 
         } catch (e: CancellationException) {
@@ -274,17 +299,108 @@ class TaskManager @Inject constructor(
     }
 
     /**
+     * Run [steps]; when a step fails, ask the LLM for the remaining steps from the
+     * screen the phone is on now (up to [MAX_RECOVERIES] times). Approvals still apply
+     * to every recovered step. Needs an API key; without one the first failure is final.
+     */
+    private suspend fun runWithRecovery(
+        taskId: String,
+        goal: String,
+        steps: List<ActionStep>,
+        params: Map<String, String>
+    ): FlowResult {
+        val executed = mutableListOf<ActionStep>()
+        var current = steps
+        var recoveries = 0
+        while (true) {
+            when (val outcome = runStepsInternal(taskId, goal, current)) {
+                RunOutcome.Success -> {
+                    executed += current
+                    return FlowResult.Done(executed, recovered = recoveries > 0)
+                }
+                RunOutcome.Stopped -> return FlowResult.Stopped
+                is RunOutcome.StepFailed -> {
+                    executed += current.take(outcome.index)
+                    val failedStep = current[outcome.index]
+                    if (recoveries >= MAX_RECOVERIES || !apiKeyStore.hasAnyKey()) {
+                        return FlowResult.Failed(outcome.reason)
+                    }
+                    recoveries++
+                    Log.w(TAG, "Step failed (${outcome.reason}) — recovery $recoveries/$MAX_RECOVERIES")
+                    _state.value = TaskState.Planning
+                    voiceManager.speak("That didn't work. Let me try another way.", flush = false)
+
+                    val next = try {
+                        continuePlan(goal, executed, failedStep, outcome.reason, params)
+                    } catch (e: LlmException) {
+                        Log.w(TAG, "Recovery planning failed: ${e.message}")
+                        return FlowResult.Failed(outcome.reason)
+                    }
+                    if (next.isEmpty()) return FlowResult.Failed(outcome.reason)
+                    if (next.any { it.action == ActionStep.CLARIFY }) {
+                        return FlowResult.Failed(
+                            next.first { it.action == ActionStep.CLARIFY }.clarification ?: outcome.reason
+                        )
+                    }
+                    current = next
+                }
+            }
+        }
+    }
+
+    /** Ask the LLM for the remaining steps after [failed], filled with [params]. */
+    private suspend fun continuePlan(
+        goal: String,
+        done: List<ActionStep>,
+        failed: ActionStep,
+        error: String,
+        params: Map<String, String>
+    ): List<ActionStep> {
+        val userContent = PlannerPrompt.continueMessage(
+            goal, done, failed, error, params, actionExecutor.getUiSnapshot()
+        )
+        val plan = completeWithLlm(userContent)
+        // The model may use {slots} or literal values — fill whatever slots it used.
+        return SkillMatcher.fill(plan.steps, params + plan.params) ?: plan.steps.filter {
+            SkillMatcher.slotsInSteps(listOf(it)).isEmpty()
+        }
+    }
+
+    /**
+     * If the plan opens one app but never verifies anything, add a check that the
+     * app is in front at the end — so "Done" means something.
+     */
+    private fun withVerify(steps: List<ActionStep>): List<ActionStep> {
+        if (steps.any { it.action == ActionStep.VERIFY }) return steps
+        if (steps.any { it.action in setOf(ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER) }) {
+            return steps
+        }
+        val apps = steps.filter { it.action == ActionStep.OPEN_APP }.mapNotNull { it.pkg }.distinct()
+        return if (apps.size == 1) steps + ActionStep(action = ActionStep.VERIFY, pkg = apps.first()) else steps
+    }
+
+    private fun decodePatterns(raw: String): List<String> = try {
+        patternJson.decodeFromString(ListSerializer(String.serializer()), raw)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    /**
      * Plan with Groq; if it fails (or has no key) and a Gemini key exists, use Gemini.
      * @throws LlmException with the most useful user-readable reason.
      */
     private suspend fun planWithLlm(goal: String): Plan {
         val memoryContext = memoryManager.buildContextString(goal)
         val uiSnapshot = actionExecutor.getUiSnapshot()
+        return completeWithLlm(PlannerPrompt.userMessage(goal, uiSnapshot, memoryContext))
+    }
 
+    /** Send a planner request to Groq, falling back to Gemini. */
+    private suspend fun completeWithLlm(userContent: String): Plan {
         var groqError: LlmException? = null
         if (apiKeyStore.groqKey().isNotBlank()) {
             try {
-                return groqClient.plan(goal, uiSnapshot, memoryContext = memoryContext)
+                return groqClient.complete(userContent)
             } catch (e: LlmException) {
                 Log.w(TAG, "Groq failed: ${e.message}")
                 groqError = e
@@ -293,7 +409,7 @@ class TaskManager @Inject constructor(
         if (geminiClient.isConfigured()) {
             try {
                 Log.i(TAG, "Falling back to Gemini")
-                return geminiClient.plan(goal, uiSnapshot, memoryContext)
+                return geminiClient.complete(userContent)
             } catch (e: LlmException) {
                 Log.w(TAG, "Gemini failed: ${e.message}")
                 throw groqError ?: e
@@ -319,8 +435,11 @@ class TaskManager @Inject constructor(
         )
         try {
             Log.i(TAG, "Direct execution [$taskId]: $label (${steps.size} steps)")
-            val outcome = runStepsInternal(taskId, label, steps)
-            if (outcome is RunOutcome.StepFailed) fail(taskId, label, outcome.reason)
+            when (val outcome = runStepsInternal(taskId, label, steps)) {
+                RunOutcome.Success -> finishSuccess(taskId, label, steps)
+                is RunOutcome.StepFailed -> fail(taskId, label, outcome.reason)
+                RunOutcome.Stopped -> {}
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -335,9 +454,9 @@ class TaskManager @Inject constructor(
 
     /**
      * Run [steps] in order. Returns [RunOutcome.StepFailed] at the first step that
-     * didn't work (the caller decides whether to re-plan or fail), or
+     * didn't work (the caller decides whether to recover or fail), or
      * [RunOutcome.Stopped] if the user denied / cancelled (state already set).
-     * On success it sets Completed, announces it and records memory + log.
+     * Does NOT announce completion — see [finishSuccess].
      */
     private suspend fun runStepsInternal(
         taskId: String,
@@ -382,18 +501,23 @@ class TaskManager @Inject constructor(
                 auditLogger.logAutoExecuted(taskId, step, effectiveRisk)
             }
 
-            _state.value = TaskState.Executing(step, index, steps.size)
-            voiceManager.narrateStep(step)
+            _state.value = if (step.action == ActionStep.VERIFY) TaskState.Verifying
+                else TaskState.Executing(step, index, steps.size)
+            if (step.action != ActionStep.VERIFY) voiceManager.narrateStep(step)
             val result = actionExecutor.execute(step)
             if (!result.ok) {
-                return RunOutcome.StepFailed(result.error ?: "A step didn't work.")
+                return RunOutcome.StepFailed(result.error ?: "A step didn't work.", index)
             }
             if (step.action == ActionStep.READ_TEXT && !result.output.isNullOrBlank()) {
                 voiceManager.speak(result.output.take(400), flush = false)
             }
         }
+        return RunOutcome.Success
+    }
 
-        _state.value = TaskState.Verifying
+    /** Announce and record a finished task. */
+    private suspend fun finishSuccess(taskId: String, goal: String, steps: List<ActionStep>) {
+        val primaryApp = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
         _state.value = TaskState.Completed("Done!")
         voiceManager.announceCompletion("Done")
 
@@ -407,7 +531,6 @@ class TaskManager @Inject constructor(
             error = null
         )
         Log.i(TAG, "✅ Task [$taskId] completed")
-        return RunOutcome.Success
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -461,6 +584,8 @@ class TaskManager @Inject constructor(
     }
 
     private companion object {
+        /** How many times a task may re-plan from the current screen after a failed step. */
+        const val MAX_RECOVERIES = 2
         const val ACCESSIBILITY_OFF =
             "Please turn on AURA in your phone's Accessibility settings first, so I can control apps."
     }

@@ -111,4 +111,20 @@ class SkillMatcherTest {
         assertTrue(kw.containsAll(listOf("send", "whatsapp")))
         assertTrue(kw.none { it.contains("{") || it == "to" || it == "on" })
     }
+
+    @Test fun `values in links are URL-encoded and turned back into slots`() {
+        val template = listOf(ActionStep(action = "open_link",
+            uri = "https://wa.me/{contact_number_digits}?text={message_text}"))
+        val params = mapOf("contact_number_digits" to "919876543210", "message_text" to "hi there & bye")
+        val filled = SkillMatcher.fill(template, params)!!
+        assertEquals("https://wa.me/919876543210?text=hi%20there%20%26%20bye", filled[0].uri)
+        val back = SkillMatcher.templatize(filled, params)
+        assertEquals("https://wa.me/{contact_number_digits}?text={message_text}", back[0].uri)
+    }
+
+    @Test fun `slotsInSteps sees every text field`() {
+        val steps = listOf(ActionStep(action = "dial", number = "{contact_number}"),
+            ActionStep(action = "alarm", time = "{time}"))
+        assertEquals(setOf("contact_number", "time"), SkillMatcher.slotsInSteps(steps))
+    }
 }

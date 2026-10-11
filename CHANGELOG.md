@@ -7,6 +7,16 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Added — reliability
+- Mid-task recovery: a failed step makes the LLM plan only the remaining steps from the current screen (max 2), instead of failing
+- `verify` step: "Done" means the right app/text is actually on screen; only verified paths are saved as skills
+- Shortcut actions via Android intents: `dial`, `sms`, `alarm`, `timer`, `open_link` (wa.me, YouTube search, Maps directions); new built-in skills for call, SMS, alarm, timer
+- Contact lookup: "Mom" / "rahul" → exact contact + number; asks when two people match (READ_CONTACTS, optional)
+- Speech language setting (phone default, English (India), Hindi, English (US)); popup shows what was heard with Cancel
+- Screen snapshot is role-tagged (`[button] Send #id`), deeper, and built only when planning (was rebuilt on every event, 5 levels deep)
+- Waits end as soon as the screen settles instead of fixed sleeps
+
+
 ### Changed — skill system (database v7)
 - Skills are stored per **variant**: task × OEM skin × Android version group × app major version, so different phones keep their own steps
 - Stored skills run with **no LLM call**: phrase patterns ("send {message_text} to {contact_name} on whatsapp") are matched on the phone and fill the step template

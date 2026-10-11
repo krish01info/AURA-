@@ -43,7 +43,17 @@ data class ActionStep(
 
     // ── Clarification ──────────────────────────────────────
     /** Set when the LLM cannot determine the goal and needs to ask the user. */
-    val clarification: String? = null
+    val clarification: String? = null,
+
+    // ── Shortcuts (Android intents — no screen tapping) ─────
+    /** Link for open_link: "https://…", "geo:…", "https://wa.me/<number>?text=…". */
+    val uri: String? = null,
+
+    /** Phone number for dial / sms. */
+    val number: String? = null,
+
+    /** "HH:MM" (24 h) for alarm; "HH:MM:SS", "MM:SS" or seconds for timer. */
+    val time: String? = null
 ) {
     companion object {
         // Supported action primitives
@@ -60,6 +70,16 @@ data class ActionStep(
         const val READ_TEXT         = "read_text"
         const val PRESS_KEY         = "press_key"
         const val CLARIFY           = "clarify"
+
+        /** Check the task worked: app [pkg] in front and/or [text] visible. Fails the step if not. */
+        const val VERIFY            = "verify"
+
+        // Shortcuts — launched as Android intents
+        const val DIAL              = "dial"       // opens the dialer with [number] (doesn't call)
+        const val SMS               = "sms"        // opens SMS composer: [number], [inputText]
+        const val ALARM             = "alarm"      // sets an alarm at [time], label [message]
+        const val TIMER             = "timer"      // starts a timer for [time], label [message]
+        const val OPEN_LINK         = "open_link"  // opens [uri] (web, maps, wa.me, youtube…)
     }
 }
 

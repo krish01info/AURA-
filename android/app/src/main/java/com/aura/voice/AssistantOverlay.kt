@@ -49,7 +49,8 @@ class AssistantOverlay @Inject constructor(
         val onDeny: (() -> Unit)? = null,
         val onOpenApp: (() -> Unit)? = null,
         val onTalk: (() -> Unit)? = null,
-        val onClose: (() -> Unit)? = null
+        val onClose: (() -> Unit)? = null,
+        val onCancel: (() -> Unit)? = null
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -249,6 +250,7 @@ class AssistantOverlay @Inject constructor(
                 dp(ctx, 40)
             ).apply { marginStart = dp(ctx, 8) })
         }
+        actions.onCancel?.let { add("Cancel", false, it) }
         actions.onClose?.let { add("Close", false, it) }
         actions.onTalk?.let { add("Talk", false, it) }
         actions.onDeny?.let { add("Deny", false, it) }

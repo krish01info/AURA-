@@ -71,12 +71,15 @@ com.aura/
          │     hit  → run filled steps — NO LLM call; failed step → SkillUpdater + re-plan once
          │     miss → MemoryManager context + UIObserver snapshot (≤2000 chars)
          │            → GroqClient.plan  (fails / no key → GeminiClient.plan) → Plan
-         └─ runStepsInternal(steps), per step:
-               AppPermissionManager.evaluate → PolicyEngine.classify
-               LOW/MEDIUM → ActionExecutor.execute → StepResult (stop on failure)
-               HIGH/CRITICAL → WaitingForUser; popup or HomeScreen asks
-                               (voice yes/no for HIGH, BiometricGate for CRITICAL)
-            success → SkillLearner.learn (saves this phone's variant) + MemoryManager.remember
+         │     contacts: ContactResolver adds {contact_number}; ambiguous name → ask
+         └─ runWithRecovery(steps)   (ends with a verify step: right app / text on screen)
+               runStepsInternal, per step:
+                 AppPermissionManager.evaluate → PolicyEngine.classify
+                 LOW/MEDIUM → ActionExecutor.execute → StepResult (screen actions or intents)
+                 HIGH/CRITICAL → WaitingForUser; popup or HomeScreen asks
+                                 (voice yes/no for HIGH, BiometricGate for CRITICAL)
+               step failed → LLM plans the REST from the current screen (max 2), continue
+            success → SkillLearner.learn (path that worked) + MemoryManager.remember
 ```
 
 - Skill model and rules: `skills/package.md`. `SkillRepository` only serves the Skill Store UI.

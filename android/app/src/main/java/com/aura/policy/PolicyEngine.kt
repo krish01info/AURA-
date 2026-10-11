@@ -46,7 +46,16 @@ class PolicyEngine @Inject constructor() {
         ActionStep.HOME,
         ActionStep.WAIT,
         ActionStep.FIND_ELEMENT,
-        ActionStep.READ_TEXT     -> RiskLevel.LOW
+        ActionStep.READ_TEXT,
+        ActionStep.VERIFY        -> RiskLevel.LOW
+
+        // LOW — shortcuts only OPEN an app / set a reminder; nothing is sent or paid.
+        // (A send still needs a tap, which the planner gates with confirm_send.)
+        ActionStep.DIAL,          // opens the dialer, doesn't call
+        ActionStep.SMS,           // opens the composer, doesn't send
+        ActionStep.ALARM,
+        ActionStep.TIMER         -> RiskLevel.LOW
+        ActionStep.OPEN_LINK     -> RiskLevel.MEDIUM
 
         // MEDIUM — UI interaction but no destructive effect
         ActionStep.SCROLL,

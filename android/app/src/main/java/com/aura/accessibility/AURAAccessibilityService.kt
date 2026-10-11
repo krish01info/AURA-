@@ -23,6 +23,7 @@ class AURAAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         // Bind the ActionExecutor so it can call service APIs
         actionExecutor.bind(this)
+        uiObserver.attach(this)
 
         // Android reconnects this service after a reboot, so resume "Hey AURA" here
         // if the user left voice mode on. (If Android refuses to start a microphone
@@ -33,9 +34,9 @@ class AURAAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        val rootNode = rootInActiveWindow
-        uiObserver.update(event, rootNode)
-        rootNode?.recycle()
+        // Cheap: only records the package and when the screen changed.
+        // The screen text is read on demand when a plan is made (UIObserver.getTextSnapshot).
+        uiObserver.onEvent(event)
     }
 
     override fun onInterrupt() {
@@ -45,5 +46,6 @@ class AURAAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         actionExecutor.unbind()
+        uiObserver.detach()
     }
 }

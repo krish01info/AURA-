@@ -23,6 +23,7 @@ private const val TAG = "SkillSeeder"
  *
  * Stats start at zero: they are real counts from this phone, not invented numbers.
  * No payment seeds — payment flows are always planned fresh against the live screen.
+ * Shortcut seeds (links / intents) are preferred over screen-tapping ones by SkillRouter.
  */
 @Singleton
 class SkillSeeder @Inject constructor(
@@ -32,16 +33,33 @@ class SkillSeeder @Inject constructor(
     private val stepsSerializer = ListSerializer(ActionStep.serializer())
     private val stringsSerializer = ListSerializer(String.serializer())
 
-    /** Insert any built-in seed that isn't in the database yet. Cheap; safe to call every launch. */
+    /**
+     * Insert built-in seeds that are missing, and refresh built-in seeds whose steps or
+     * patterns changed in a new app version (keeping this phone's usage counters).
+     * Cheap; safe to call every launch.
+     */
     suspend fun seedIfEmpty() {
         var added = 0
+        var refreshed = 0
         for (seed in SEEDS) {
-            if (skillPackDao.getSkill(seed.skillId) == null) {
-                skillPackDao.upsert(seed)
-                added++
+            val existing = skillPackDao.getSkill(seed.skillId)
+            when {
+                existing == null -> { skillPackDao.upsert(seed); added++ }
+                existing.createdBy == "builtin" &&
+                    (existing.steps != seed.steps || existing.phrasePatterns != seed.phrasePatterns) -> {
+                    skillPackDao.upsert(seed.copy(
+                        usageCount = existing.usageCount,
+                        successCount = existing.successCount,
+                        failureCount = existing.failureCount,
+                        successRate = existing.successRate,
+                        lastUsedAt = existing.lastUsedAt,
+                        version = existing.version + 1
+                    ))
+                    refreshed++
+                }
             }
         }
-        if (added > 0) Log.i(TAG, "✅ Inserted $added built-in skill(s)")
+        if (added + refreshed > 0) Log.i(TAG, "✅ Built-in skills: $added added, $refreshed refreshed")
     }
 
     private fun seed(
@@ -78,6 +96,7 @@ class SkillSeeder @Inject constructor(
 
     private val SEEDS: List<SkillPackEntity> by lazy {
         listOf(
+            // ── Shortcut seeds (Android intents / links — no screen tapping) ──
             seed(
                 app = "com.whatsapp", category = "messaging", action = "send_message",
                 name = "WhatsApp: send message",
@@ -89,6 +108,30 @@ class SkillSeeder @Inject constructor(
                     "message {contact_name} on whatsapp {message_text}",
                     "tell {contact_name} on whatsapp {message_text}",
                     "whatsapp {contact_name} saying {message_text}"
+                ),
+                // Needs the contact's number (ContactResolver). Without contacts permission
+                // this variant can't be filled and the search-based one below is used instead.
+                steps = listOf(
+                    ActionStep(action = ActionStep.OPEN_LINK, pkg = "com.whatsapp",
+                        uri = "https://wa.me/{contact_number_digits}?text={message_text}"),
+                    ActionStep(action = ActionStep.WAIT, waitMs = 2500L),
+                    ActionStep(action = ActionStep.CONFIRM_SEND,
+                        message = "Send \"{message_text}\" to {contact_name} on WhatsApp?", risk = "HIGH"),
+                    ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send", text = "Send"),
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.whatsapp", text = "{message_text}")
+                ),
+                risk = "HIGH",
+                description = "Send a WhatsApp message to a contact"
+            ),
+            seed(
+                app = "com.whatsapp", category = "messaging", action = "send_message_search",
+                name = "WhatsApp: send message (search)",
+                patterns = listOf(
+                    "send {message_text} to {contact_name} on whatsapp",
+                    "send a whatsapp message to {contact_name} saying {message_text}",
+                    "message {contact_name} on whatsapp saying {message_text}",
+                    "message {contact_name} on whatsapp {message_text}",
+                    "tell {contact_name} on whatsapp {message_text}"
                 ),
                 steps = listOf(
                     ActionStep(action = ActionStep.OPEN_APP, pkg = "com.whatsapp", text = "WhatsApp"),
@@ -102,10 +145,47 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.TYPE, inputText = "{message_text}"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Send \"{message_text}\" to {contact_name} on WhatsApp?", risk = "HIGH"),
-                    ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send")
+                    ActionStep(action = ActionStep.TAP, viewId = "com.whatsapp:id/send"),
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.whatsapp", text = "{message_text}")
                 ),
                 risk = "HIGH",
-                description = "Send a WhatsApp message to a contact"
+                description = "Send a WhatsApp message by searching the contact"
+            ),
+            seed(
+                app = "com.android.dialer", category = "calling", action = "call_contact",
+                name = "Phone: call",
+                patterns = listOf("call {contact_name}", "phone {contact_name}", "dial {contact_name}",
+                    "make a call to {contact_name}", "ring {contact_name}"),
+                steps = listOf(ActionStep(action = ActionStep.DIAL, number = "{contact_number}")),
+                risk = "LOW",
+                description = "Open the dialer with a contact's number"
+            ),
+            seed(
+                app = "com.android.mms", category = "messaging", action = "send_sms",
+                name = "SMS: text",
+                patterns = listOf("text {contact_name} saying {message_text}", "sms {contact_name} saying {message_text}",
+                    "send an sms to {contact_name} saying {message_text}", "send a text to {contact_name} saying {message_text}"),
+                steps = listOf(ActionStep(action = ActionStep.SMS, number = "{contact_number}", inputText = "{message_text}")),
+                risk = "LOW",
+                description = "Open an SMS to a contact with the message typed"
+            ),
+            seed(
+                app = "com.android.deskclock", category = "clock", action = "set_alarm",
+                name = "Clock: alarm",
+                patterns = listOf("set an alarm for {time}", "set alarm for {time}", "wake me up at {time}",
+                    "alarm at {time}", "set an alarm at {time}"),
+                steps = listOf(ActionStep(action = ActionStep.ALARM, time = "{time}", message = "AURA")),
+                risk = "LOW",
+                description = "Set an alarm"
+            ),
+            seed(
+                app = "com.android.deskclock", category = "clock", action = "set_timer",
+                name = "Clock: timer",
+                patterns = listOf("set a timer for {time}", "set timer for {time}", "start a timer for {time}",
+                    "timer for {time}", "remind me in {time}"),
+                steps = listOf(ActionStep(action = ActionStep.TIMER, time = "{time}", message = "AURA")),
+                risk = "LOW",
+                description = "Start a timer"
             ),
             seed(
                 app = "com.google.android.youtube", category = "media", action = "search_play",
@@ -118,12 +198,10 @@ class SkillSeeder @Inject constructor(
                     "open youtube and search {search_query}"
                 ),
                 steps = listOf(
-                    ActionStep(action = ActionStep.OPEN_APP, pkg = "com.google.android.youtube", text = "YouTube"),
+                    ActionStep(action = ActionStep.OPEN_LINK, pkg = "com.google.android.youtube",
+                        uri = "https://www.youtube.com/results?search_query={search_query}"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 2000L),
-                    ActionStep(action = ActionStep.TAP, text = "Search"),
-                    ActionStep(action = ActionStep.TYPE, inputText = "{search_query}"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1000L),
-                    ActionStep(action = ActionStep.TAP, text = "{search_query}")
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.google.android.youtube")
                 ),
                 risk = "LOW",
                 description = "Search YouTube"
@@ -139,25 +217,23 @@ class SkillSeeder @Inject constructor(
                     "how do i get to {destination}"
                 ),
                 steps = listOf(
-                    ActionStep(action = ActionStep.OPEN_APP, pkg = "com.google.android.apps.maps", text = "Maps"),
+                    ActionStep(action = ActionStep.OPEN_LINK, pkg = "com.google.android.apps.maps",
+                        uri = "https://www.google.com/maps/dir/?api=1&destination={destination}"),
                     ActionStep(action = ActionStep.WAIT, waitMs = 2000L),
-                    ActionStep(action = ActionStep.TAP, text = "Search here"),
-                    ActionStep(action = ActionStep.TYPE, inputText = "{destination}"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
-                    ActionStep(action = ActionStep.TAP, text = "{destination}"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
-                    ActionStep(action = ActionStep.TAP, text = "Directions")
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.google.android.apps.maps")
                 ),
                 risk = "LOW",
                 description = "Get directions in Google Maps"
             ),
+            // ── App seeds ───────────────────────────────────────────────
             seed(
                 app = "com.google.android.gm", category = "email", action = "read_inbox",
                 name = "Gmail: open inbox",
                 patterns = listOf("open gmail", "open my inbox", "check my email", "check my mail", "open my email"),
                 steps = listOf(
                     ActionStep(action = ActionStep.OPEN_APP, pkg = "com.google.android.gm", text = "Gmail"),
-                    ActionStep(action = ActionStep.WAIT, waitMs = 1500L)
+                    ActionStep(action = ActionStep.WAIT, waitMs = 1500L),
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.google.android.gm")
                 ),
                 risk = "LOW",
                 description = "Open the Gmail inbox"
@@ -174,7 +250,8 @@ class SkillSeeder @Inject constructor(
                     ActionStep(action = ActionStep.FIND_ELEMENT, text = "Reorder"),
                     ActionStep(action = ActionStep.CONFIRM_SEND,
                         message = "Reorder your last Zomato order?", risk = "HIGH"),
-                    ActionStep(action = ActionStep.TAP, text = "Reorder")
+                    ActionStep(action = ActionStep.TAP, text = "Reorder"),
+                    ActionStep(action = ActionStep.VERIFY, pkg = "com.application.zomato")
                 ),
                 risk = "HIGH",
                 description = "Reorder your last Zomato order"

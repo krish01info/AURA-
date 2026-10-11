@@ -1,7 +1,11 @@
 package com.aura.accessibility
 
+import android.accessibilityservice.AccessibilityService
+import android.os.Build
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -9,64 +13,117 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * UIObserver — maintains a live snapshot of the current screen's UI tree.
+ * UIObserver — reads the current screen for the LLM and tracks when it last changed.
  *
- * Updated on every [AccessibilityEvent] from [AURAAccessibilityService].
- * The ActionExecutor and TaskPlanner read from this to understand screen state.
+ * The snapshot is built **on demand** (only when a plan is made), not on every
+ * accessibility event, and describes each visible element with its role so the
+ * model knows what it can tap or type into:
  *
- * Security: Raw UI text is isolated and NEVER passed as instructions to the LLM.
- * It is always wrapped in [UI_CONTENT_START]...[UI_CONTENT_END] tags in the prompt.
+ *     [button] Send #com.whatsapp:id/send
+ *     [input] Message #com.whatsapp:id/entry
+ *     [text] Priya Sharma
+ *     [toggle on] Wi-Fi
+ *
+ * Duplicate lines are dropped and the result is capped at [MAX_CHARS] (prompt budget).
+ *
+ * Security: this text is screen data. It is always wrapped in
+ * [UI_CONTENT_START]…[UI_CONTENT_END] in the prompt and never treated as instructions.
  */
 @Singleton
 class UIObserver @Inject constructor() {
 
+    private var service: AccessibilityService? = null
+
     private val _currentPackage = MutableStateFlow("")
     val currentPackage: StateFlow<String> = _currentPackage.asStateFlow()
 
-    private val _uiSnapshot = MutableStateFlow("")
-    val uiSnapshot: StateFlow<String> = _uiSnapshot.asStateFlow()
+    /** uptimeMillis of the last event that changed what's on screen. */
+    @Volatile private var lastChangeAt = 0L
 
-    /**
-     * Called from [AURAAccessibilityService.onAccessibilityEvent].
-     * Updates the live UI snapshot.
-     */
-    fun update(event: AccessibilityEvent, root: AccessibilityNodeInfo?) {
-        event.packageName?.let { _currentPackage.value = it.toString() }
-        root?.let { _uiSnapshot.value = extractText(it) }
+    fun attach(accessibilityService: AccessibilityService) { service = accessibilityService }
+    fun detach() { service = null }
+
+    /** Called from [AURAAccessibilityService.onAccessibilityEvent] — must stay cheap. */
+    fun onEvent(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString()
+        // AURA's own popup updates while a task runs — that isn't the target app changing.
+        if (pkg != null && pkg == service?.packageName) return
+        pkg?.let { _currentPackage.value = it }
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> lastChangeAt = SystemClock.uptimeMillis()
+        }
     }
 
     /**
-     * Returns a sanitised text snapshot of the current UI tree.
-     * Used as context for LLM planning.
+     * Wait until the screen has stopped changing for [quietMs] (e.g. an app finished
+     * loading), waiting at least [minMs] and at most [maxMs]. Faster than fixed sleeps
+     * on quick phones, and safer on slow ones.
      */
-    fun getTextSnapshot(): String = _uiSnapshot.value
-
-    /**
-     * Recursively extracts visible text from the accessibility node tree.
-     * Limits depth to avoid huge outputs; caps total length.
-     */
-    private fun extractText(node: AccessibilityNodeInfo, depth: Int = 0): String {
-        if (depth > 5) return ""  // Keep shallow — deep nodes are rarely actionable
-        val builder = StringBuilder()
-
-        val text = node.text?.toString()?.trim()
-        val desc = node.contentDescription?.toString()?.trim()
-
-        // Prefer visible text; only fall back to a short content-description when
-        // there is no text at all (avoids duplicating icon labels and long tooltips).
-        if (!text.isNullOrEmpty()) {
-            builder.appendLine(text)
-        } else if (!desc.isNullOrEmpty() && desc.length <= 60) {
-            builder.appendLine(desc)
+    suspend fun waitForStable(quietMs: Long = 500, minMs: Long = 300, maxMs: Long = 4000) {
+        val start = SystemClock.uptimeMillis()
+        if (minMs > 0) delay(minMs.coerceAtMost(maxMs))
+        while (true) {
+            val now = SystemClock.uptimeMillis()
+            if (now - start >= maxMs) return
+            if (now - lastChangeAt >= quietMs) return
+            delay(100)
         }
-        // [id:] lines are omitted — resource IDs are internal and not useful to the LLM.
+    }
 
+    /** A role-tagged description of the screen in front, built now. */
+    fun getTextSnapshot(): String {
+        val root = service?.rootInActiveWindow ?: return ""
+        val lines = LinkedHashSet<String>()
+        collect(root, 0, lines)
+        val sb = StringBuilder()
+        for (line in lines) {
+            if (sb.length + line.length + 1 > MAX_CHARS) break
+            sb.append(line).append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun collect(node: AccessibilityNodeInfo, depth: Int, out: MutableSet<String>) {
+        if (depth > MAX_DEPTH || out.size >= MAX_LINES) return
+        if (node.isVisibleToUser) {
+            describe(node)?.let { out += it }
+        }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            builder.append(extractText(child, depth + 1))
-            child.recycle()
+            collect(child, depth + 1, out)
         }
+    }
 
-        return builder.toString().take(2000) // Tight cap — matched to prompt budget
+    private fun describe(node: AccessibilityNodeInfo): String? {
+        val text = node.text?.toString()?.trim()?.replace('\n', ' ')
+        val desc = node.contentDescription?.toString()?.trim()?.replace('\n', ' ')
+        val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.hintText?.toString()?.trim() else null
+        val label = (text?.takeIf { it.isNotEmpty() }
+            ?: desc?.takeIf { it.isNotEmpty() && it.length <= 80 }
+            ?: hint?.takeIf { it.isNotEmpty() })?.take(120)
+        val id = node.viewIdResourceName
+
+        val role = when {
+            node.isEditable -> "input"
+            node.isCheckable -> if (node.isChecked) "toggle on" else "toggle off"
+            node.isClickable || node.isLongClickable -> "button"
+            else -> "text"
+        }
+        // Plain text needs a label; actionable elements are kept if they have a label or an id.
+        if (label == null && (role == "text" || id == null)) return null
+        return buildString {
+            append('[').append(role).append(']')
+            if (label != null) append(' ').append(label)
+            if (id != null && role != "text") append(" #").append(id)
+        }
+    }
+
+    private companion object {
+        const val MAX_CHARS = 2000
+        const val MAX_LINES = 150
+        const val MAX_DEPTH = 30
     }
 }

@@ -24,6 +24,10 @@
 
     <!-- Vibration for confirmations -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Shortcut actions: set alarms/timers directly (normal permission, no prompt) -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Contact lookup ("message Mom") — asked at runtime; AURA works without it -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- ======================================= -->
     <!--     OTA UPDATER PERMISSIONS             -->
@@ -52,6 +56,24 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Shortcut actions -->
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 

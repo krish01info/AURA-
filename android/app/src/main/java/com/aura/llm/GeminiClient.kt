@@ -77,7 +77,10 @@ class GeminiClient @Inject constructor(
         goal: String,
         uiContext: String,
         memoryContext: String = ""
-    ): Plan {
+    ): Plan = complete(PlannerPrompt.userMessage(goal, uiContext, memoryContext))
+
+    /** Send any planner request (new plan or recovery) — same contract as [GroqClient.complete]. */
+    suspend fun complete(userContent: String): Plan {
         val key = apiKeyStore.geminiKey()
         if (key.isBlank()) throw LlmException("No Gemini API key set.")
 
@@ -92,7 +95,7 @@ class GeminiClient @Inject constructor(
                     contents = listOf(
                         GeminiContent(
                             parts = listOf(
-                                GeminiPart(PlannerPrompt.userMessage(goal, uiContext, memoryContext))
+                                GeminiPart(userContent)
                             )
                         )
                     ),

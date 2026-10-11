@@ -52,4 +52,25 @@ class PlannerPromptTest {
         assertEquals("{query}", template[1].inputText)
         assertEquals("Search", template[0].text)
     }
+
+    @Test fun `recovery request lists done steps, the failure and the current screen`() {
+        val msg = PlannerPrompt.continueMessage(
+            goal = "send hi to priya on whatsapp",
+            done = listOf(com.aura.data.model.ActionStep(action = "open_app", pkg = "com.whatsapp")),
+            failed = com.aura.data.model.ActionStep(action = "tap", text = "Search"),
+            error = "I couldn't find \"Search\" on the screen.",
+            params = mapOf("contact_name" to "Priya"),
+            uiContext = "[button] New chat #com.whatsapp:id/fab"
+        )
+        assertTrue(msg.contains("1. open_app pkg=com.whatsapp"))
+        assertTrue(msg.contains("FAILED: tap text=\"Search\""))
+        assertTrue(msg.contains("contact_name=\"Priya\""))
+        assertTrue(msg.contains("[UI_CONTENT_START]\n[button] New chat"))
+    }
+
+    @Test fun `system prompt documents every action the executor supports`() {
+        listOf("open_app", "tap", "type", "scroll", "swipe", "wait", "back", "home", "find_element",
+            "read_text", "confirm_send", "verify", "clarify", "dial", "sms", "alarm", "timer", "open_link")
+            .forEach { assertTrue("missing $it", PlannerPrompt.SYSTEM.contains("\"$it\"")) }
+    }
 }
