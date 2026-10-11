@@ -15,7 +15,7 @@ LLM planning: turn a goal + screen text into a list of `ActionStep`s.
 - Never read keys from BuildConfig directly; use `ApiKeyStore` (CI builds have empty BuildConfig keys).
 
 ## Prompt budget (per call)
-- System prompt: ~600 tokens (skill fields, shortcuts, verify)
+- System prompt: ~800 tokens (skill fields, shortcuts incl. generic intent/media/notifications, verify)
 - Recovery requests (`continueMessage`) only happen after a failed step
 - Memory context: ~60 tokens (compact `[MEMORY:...]` tag)
 - UI snapshot: max 2000 chars (~500 tokens)

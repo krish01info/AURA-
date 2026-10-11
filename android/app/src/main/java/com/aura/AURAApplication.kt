@@ -8,6 +8,9 @@ import com.aura.cloud.SupabaseAuthManager
 import com.aura.skills.OsMigrationHandler
 import com.aura.skills.SkillCache
 import com.aura.skills.SkillSeeder
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
+import com.aura.skills.AppShortcutsUpdater
 import com.aura.update.UpdateCheckWorker
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -22,7 +25,13 @@ import javax.inject.Inject
  * and set up the dependency injection graph for the entire app.
  */
 @HiltAndroidApp
-class AURAApplication : Application() {
+class AURAApplication : Application(), Configuration.Provider {
+
+    /** Lets WorkManager create @HiltWorker workers (e.g. UpdateCheckWorker). */
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
 
     @Inject lateinit var skillSeeder: SkillSeeder
     @Inject lateinit var skillCache: SkillCache
@@ -39,6 +48,7 @@ class AURAApplication : Application() {
         createNotificationChannels()
         UpdateCheckWorker.scheduleUpdateChecks(this)
         UpdateCheckWorker.checkNow(this)
+        AppShortcutsUpdater.schedule(this)
         CoroutineScope(Dispatchers.IO).launch {
             // Establish Supabase session (anonymous) before any cloud calls
             supabaseAuthManager.ensureSession()

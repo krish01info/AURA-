@@ -30,6 +30,10 @@ interface SkillPackDao {
     @Query("SELECT * FROM skill_packs WHERE skillId = :skillId")
     suspend fun getSkill(skillId: String): SkillPackEntity?
 
+    /** Rows created by one source, e.g. "builtin" (app shortcuts) or "local". */
+    @Query("SELECT * FROM skill_packs WHERE createdBy = :creator")
+    suspend fun getByCreator(creator: String): List<SkillPackEntity>
+
     /** Every variant (all OS / skin / app versions) of one task. */
     @Query("SELECT * FROM skill_packs WHERE intentId = :intentId")
     suspend fun getVariantsForIntent(intentId: String): List<SkillPackEntity>

@@ -5,8 +5,10 @@ import android.accessibilityservice.GestureDescription
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.net.Uri
 import android.provider.AlarmClock
+import android.view.KeyEvent
 import android.graphics.Path
 import android.os.Bundle
 import android.util.Log
@@ -14,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.aura.accessibility.NodeFinder
 import com.aura.accessibility.UIObserver
 import com.aura.data.model.ActionStep
+import com.aura.notifications.NotificationStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import javax.inject.Inject
@@ -46,7 +49,8 @@ data class StepResult(val ok: Boolean, val error: String? = null, val output: St
 class ActionExecutor @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val uiObserver: UIObserver,
-    private val nodeFinder: NodeFinder
+    private val nodeFinder: NodeFinder,
+    private val notifications: NotificationStore
 ) {
     private var service: AccessibilityService? = null
 
@@ -104,6 +108,13 @@ class ActionExecutor @Inject constructor(
                 ActionStep.ALARM        -> alarm(step.time, step.message)
                 ActionStep.TIMER        -> timer(step.time, step.message)
                 ActionStep.OPEN_LINK    -> openLink(step.uri, step.pkg)
+                ActionStep.INTENT       -> genericIntent(step)
+                ActionStep.MEDIA        -> media(step.text)
+                ActionStep.NOW_PLAYING  -> notifications.nowPlaying().let { msg ->
+                    if (msg == NotificationStore.NEEDS_ACCESS) StepResult.fail(msg) else StepResult(true, output = msg)
+                }
+                ActionStep.REPLY        -> reply(step.pkg, step.text, step.inputText ?: step.message)
+                ActionStep.READ_NOTIFICATIONS -> readNotifications(step.pkg, step.text)
                 else -> StepResult.fail("I don't know how to do \"${step.action}\" yet.")
             }
         } catch (e: Exception) {
@@ -414,6 +425,92 @@ class ActionExecutor @Inject constructor(
         return result
     }
 
+    /**
+     * Any Android intent described as data — this is how app shortcuts are added
+     * without code. Only safe actions are allowed (see [isAllowedIntent]): nothing
+     * that calls, pays, deletes or installs by itself.
+     */
+    private fun genericIntent(step: ActionStep): StepResult {
+        val action = step.intentAction?.trim()?.takeIf { it.isNotEmpty() } ?: Intent.ACTION_VIEW
+        val uri = step.uri?.trim()?.takeIf { it.isNotEmpty() }?.let(Uri::parse)
+        val mime = step.mime?.trim()?.takeIf { it.isNotEmpty() }
+        if (!isAllowedIntent(action, uri, mime)) {
+            return StepResult.fail("For safety I can't do that kind of action automatically.")
+        }
+        val intent = Intent(action)
+        when {
+            uri != null && mime != null -> intent.setDataAndType(uri, mime)
+            uri != null -> intent.data = uri
+            mime != null -> intent.type = mime
+        }
+        step.extras?.forEach { (key, value) -> putTypedExtra(intent, key, value) }
+
+        val pm = appContext.packageManager
+        val pkg = step.pkg?.trim()?.takeIf { it.isNotEmpty() }
+        if (pkg != null) {
+            intent.setPackage(pkg)
+            // App not installed or doesn't handle this — let any app that can, handle it.
+            if (intent.resolveActivity(pm) == null) intent.setPackage(null)
+        }
+        val result = startIntent(intent, if (pkg != null) pkg.substringAfterLast('.') else "that")
+        if (result.ok) lastLaunch = pkg to (intent.`package` ?: intent.resolveActivity(pm)?.packageName)
+        return result
+    }
+
+    private fun putTypedExtra(intent: Intent, key: String, value: String) {
+        when {
+            value.startsWith("i:") -> value.drop(2).toIntOrNull()?.let { intent.putExtra(key, it) }
+            value.startsWith("l:") -> value.drop(2).toLongOrNull()?.let { intent.putExtra(key, it) }
+            value.startsWith("b:") -> intent.putExtra(key, value.drop(2).equals("true", ignoreCase = true))
+            else -> intent.putExtra(key, value)
+        }
+    }
+
+    /** Media keys and volume for whatever app is playing — no app needs to be opened. */
+    private fun media(command: String?): StepResult {
+        val am = appContext.getSystemService(AudioManager::class.java)
+            ?: return StepResult.fail("I can't control media on this phone.")
+        val cmd = command?.trim()?.lowercase()?.replace(' ', '_').orEmpty()
+        when (cmd) {
+            "volume_up", "louder" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+            "volume_down", "quieter" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+            "mute" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+            "unmute" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
+            else -> {
+                val key = when (cmd) {
+                    "play", "resume" -> KeyEvent.KEYCODE_MEDIA_PLAY
+                    "pause" -> KeyEvent.KEYCODE_MEDIA_PAUSE
+                    "play_pause", "toggle" -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                    "next", "skip" -> KeyEvent.KEYCODE_MEDIA_NEXT
+                    "previous", "prev", "back" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                    "stop" -> KeyEvent.KEYCODE_MEDIA_STOP
+                    else -> return StepResult.fail("I don't know the media command \"$command\".")
+                }
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key))
+                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
+            }
+        }
+        return StepResult.OK
+    }
+
+    private fun reply(pkg: String?, person: String?, message: String?): StepResult {
+        if (person.isNullOrBlank()) return StepResult.fail("Who should I reply to?")
+        if (message.isNullOrBlank()) return StepResult.fail("What should the reply say?")
+        val problem = notifications.reply(pkg, person, message)
+        return if (problem == null) StepResult.OK else StepResult.fail(problem)
+    }
+
+    private fun readNotifications(pkg: String?, person: String?): StepResult {
+        if (!notifications.isEnabled()) return StepResult.fail(NotificationStore.NEEDS_ACCESS)
+        val items = notifications.recent(pkg, person)
+        val text = if (items.isEmpty()) {
+            "No new messages" + (person?.let { " from $it" } ?: "") + "."
+        } else {
+            items.joinToString(". ") { "${it.title}: ${it.text}".take(200) }
+        }
+        return StepResult(true, output = text)
+    }
+
     private fun startIntent(intent: Intent, what: String): StepResult = try {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         (service ?: appContext).startActivity(intent)
@@ -424,18 +521,38 @@ class ActionExecutor @Inject constructor(
         StepResult.fail("Android blocked opening $what.")
     }
 
-    private companion object {
+    companion object {
         val NO_SERVICE_NEEDED = setOf(
             ActionStep.WAIT, ActionStep.CONFIRM_SEND,
-            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK
+            ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK,
+            ActionStep.INTENT, ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY,
+            ActionStep.READ_NOTIFICATIONS
         )
+
+        /** Intent actions AURA may fire on its own. Nothing here sends, calls or pays by itself. */
+        private val ALLOWED_INTENT_ACTIONS = setOf(
+            Intent.ACTION_VIEW, Intent.ACTION_SEND, Intent.ACTION_SENDTO, Intent.ACTION_DIAL,
+            Intent.ACTION_WEB_SEARCH, Intent.ACTION_SEARCH, Intent.ACTION_INSERT, Intent.ACTION_MAIN,
+            "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+            "android.media.action.STILL_IMAGE_CAMERA", "android.media.action.VIDEO_CAMERA",
+            AlarmClock.ACTION_SET_ALARM, AlarmClock.ACTION_SET_TIMER, AlarmClock.ACTION_SHOW_ALARMS,
+            Intent.ACTION_POWER_USAGE_SUMMARY
+        )
+
+        fun isAllowedIntent(action: String, uri: Uri?, mime: String?): Boolean {
+            if (mime == "application/vnd.android.package-archive") return false // no installs
+            val scheme = uri?.scheme?.lowercase()
+            if (scheme == "file" || scheme == "content" && action == Intent.ACTION_VIEW && mime == null) return false
+            return action in ALLOWED_INTENT_ACTIONS || action.startsWith("android.settings.")
+        }
         const val VERIFY_TIMEOUT_MS = 5000L
         /** How long a tap may take before the screen visibly reacts. */
         const val TAP_EFFECT_TIMEOUT_MS = 2500L
         /** Steps that don't change the screen, so there's nothing to wait for afterwards. */
         val NO_SETTLE = setOf(
             ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY, ActionStep.READ_TEXT,
-            ActionStep.FIND_ELEMENT, ActionStep.ALARM, ActionStep.TIMER
+            ActionStep.FIND_ELEMENT, ActionStep.ALARM, ActionStep.TIMER, ActionStep.MEDIA,
+            ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
         )
     }
 }

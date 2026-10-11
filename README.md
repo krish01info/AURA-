@@ -68,6 +68,8 @@ AURA uses Android's **Accessibility Service** to observe and control apps on you
 | Macros | Run a named list of goals in sequence | Built |
 | Dashboard and task log | Stats and audit history | Built |
 | Self-update | Checks GitHub Releases and installs the new APK | Built |
+| App shortcuts | 50+ built-in skills for 30+ apps (WhatsApp, Spotify, YouTube, Maps, Uber, Amazon, settings…) using intents and links instead of tapping; updated from GitHub daily, no app update needed | Built |
+| Notification actions | Reply from a notification, read your latest messages, "what's playing" (optional notification access) | Built |
 | Self-healing skills | A stored skill that fails is reported and re-planned by the LLM | Built |
 | Offline speech | Vosk on-device STT | Planned (stub) |
 | On-device LLM | Gemma / Phi-3 for offline planning | Planned |

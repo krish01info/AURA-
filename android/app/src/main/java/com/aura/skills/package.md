@@ -29,9 +29,19 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 | SkillHealthMonitor.kt | Success/failure counts; BROKEN (≥2 failures and < 60%) → stale + evicted from RAM/disk. |
 | SkillUpdater.kt | Called by TaskManager after each stored-skill run; DEGRADED → checks cloud for a newer version. |
 | SkillRepository.kt | Data access for the Skill Store/Dashboard UI (not used for lookup). |
-| SkillSeeder.kt | Built-in universal seeds — shortcuts: WhatsApp (wa.me), call, SMS, alarm, timer, YouTube search, Maps directions; screen: WhatsApp search, Gmail, Zomato. Inserted if missing, refreshed when the app ships new steps (counters kept). |
+| SkillSeeder.kt | Built-in skills ("app shortcuts") from `assets/app_shortcuts.json` (or a newer downloaded copy). Each launch: insert missing, refresh changed (counters kept), delete removed. Also `ShortcutFile`/`ShortcutDef`. |
+| AppShortcutsUpdater.kt | Daily `@HiltWorker`: downloads `app_shortcuts.json` from `main` on GitHub; a valid file with a higher `version` is saved to `filesDir` and re-seeded. |
 | OsFingerprint.kt | Android API / version group, OEM skin, device, installed app versions. |
 | OsMigrationHandler.kt | On Android upgrade, marks old-version-group variants stale. |
+
+## App shortcuts (`android/app/src/main/assets/app_shortcuts.json`)
+- ~50 built-in skills for 30+ apps (WhatsApp, Spotify, YouTube, Maps, Uber, Amazon, Gmail,
+  settings panels…), mostly intents/links/media keys instead of tapping.
+- **Add or fix an app = edit the JSON, bump `version`, merge to `main`.** Phones fetch it within a day.
+- `AppShortcutsTest` (CI) checks every entry: patterns usable, every step slot filled by every
+  pattern, known actions, HIGH risk has `confirm_send`, intents on `ActionExecutor`'s allow-list.
+- Specific phrases beat generic ones ("play {query} on spotify" over "play {query}"), so a
+  generic fallback entry is fine.
 
 ## Rules
 - Never insert a `SkillPackEntity` by hand; use `SkillLearner.learn()` (or seeds).

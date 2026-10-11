@@ -236,6 +236,8 @@ fun SettingsScreen(
                 }
             }
 
+            NotificationAccessCard()
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // ── About ──────────────────────────────────────────────────────
@@ -494,6 +496,71 @@ private fun SettingsToggleRow(
                     checkedTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
+        }
+    }
+}
+
+/**
+ * Notification access (optional): lets AURA reply from a notification, read messages
+ * and tell what's playing without opening apps. Status refreshes when you come back
+ * from system settings.
+ */
+@Composable
+private fun NotificationAccessCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    fun check() = androidx.core.app.NotificationManagerCompat
+        .getEnabledListenerPackages(context).contains(context.packageName)
+    var enabled by remember { mutableStateOf(check()) }
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) enabled = check()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Notification access",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    if (enabled) "On" else "Off",
+                    color = if (enabled) AuraSuccess else AuraWarning,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+            }
+            Text(
+                "Optional. Lets AURA reply to messages from the notification, read your latest messages and say what's playing — without opening apps. Stays on the phone, memory only.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                fontSize = 12.sp
+            )
+            OutlinedButton(
+                onClick = {
+                    try {
+                        context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (_: Exception) { }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (enabled) "Manage notification access" else "Turn on notification access")
+            }
         }
     }
 }

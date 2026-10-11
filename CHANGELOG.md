@@ -7,6 +7,17 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Added — app shortcuts for many apps
+- Built-in skills are now data: `assets/app_shortcuts.json` (53 skills, 30+ apps) — WhatsApp, Telegram, Instagram, X, Spotify, YouTube Music, JioSaavn, YouTube, Maps, Uber, Amazon, Flipkart, Play Store, Gmail, Calendar, Camera, Zomato, UPI, 8 settings panels…
+- Phones re-download the file from GitHub daily (`AppShortcutsUpdater`); a higher `version` replaces built-ins without an app update. Removed entries are deleted.
+- New actions: generic `intent` (allow-listed: nothing calls, pays, deletes or installs by itself), `media` (play/pause/next/previous/volume), `now_playing`, `reply` (from the notification, asks first), `read_notifications`
+- Optional notification access (Settings) — messages stay in memory only
+- "play X on spotify" beats the generic "play X": the more specific phrase wins, even when the generic skill is in RAM
+- CI test validates every shortcut (patterns, slots, actions, risk, intent allow-list)
+
+### Fixed
+- Background update checks never ran: WorkManager had no Hilt worker factory (`UpdateCheckWorker` couldn't be created)
+
 ### Fixed — wrong taps and rough mic
 - Tapping a name no longer hits the search box that shows the same text: taps and checks skip text boxes and prefer exact, tappable matches
 - A tap that doesn't change the screen now fails (and recovers) instead of carrying on on the wrong screen
