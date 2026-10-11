@@ -77,16 +77,22 @@ class PromptInjectionDefender @Inject constructor() {
         private val INJECTION_PATTERNS = listOf(
             Regex("ignore (previous|all|prior|above) (instructions|rules|context|prompt)") to "Instruction override attempt",
             Regex("(pretend|act|imagine|you are now|forget|disregard) (you are|you're|that you)") to "Role-play / persona attack",
-            Regex("new (instruction|rule|system|directive|task)") to "New instruction injection",
-            Regex("jailbreak|dan mode|developer mode|unrestricted") to "Jailbreak attempt",
+            // Not "new task" / "new rule" alone: "add a new task to my list" is an ordinary command.
+            Regex("new (instructions?|system prompt|directives?)\\b|new rules? for (you|the assistant|aura)") to "New instruction injection",
+            // Not "developer mode": "open developer mode settings" is an ordinary command.
+            Regex("jailbreak|\\bdan mode|\\bunrestricted mode") to "Jailbreak attempt",
             Regex("you (have|now have|can now) (access|permission|ability) to") to "Privilege escalation",
-            Regex("(exfiltrate|leak|send|transmit) (my|user|private|all)") to "Data exfiltration attempt",
+            // Not plain "send my …": "send my notes to Rahul" is an ordinary command.
+            Regex("(exfiltrate|leak|transmit) (my|user|private|all)|send (all )?(my |the user'?s? )?(passwords?|otps?|pins?|credentials|api keys?)\\b") to "Data exfiltration attempt",
             Regex("(bypass|skip|avoid) (security|biometric|approval|confirmation)") to "Security bypass attempt",
             Regex("\\{\\{.*?\\}\\}|<script|<iframe|javascript:") to "Template/code injection",
         )
 
         private val URL_PATTERN = Regex("https?://|ftp://|file://")
-        private val SAFE_URL_DOMAINS = setOf("google.com", "whatsapp.com", "zomato.com")
+        private val SAFE_URL_DOMAINS = setOf(
+            "google.com", "whatsapp.com", "zomato.com", "youtube.com", "youtu.be", "wa.me",
+            "maps.app.goo.gl", "amazon.in", "flipkart.com", "spotify.com", "instagram.com"
+        )
     }
 }
 

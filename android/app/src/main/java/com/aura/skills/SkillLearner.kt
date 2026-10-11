@@ -3,6 +3,7 @@ package com.aura.skills
 import android.util.Log
 import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
+import com.aura.di.SupabaseModule
 import com.aura.data.model.ActionStep
 import com.aura.data.model.SkillPackEntity
 import com.aura.llm.Plan
@@ -167,6 +168,24 @@ class SkillLearner @Inject constructor(
             Log.e(TAG, "Failed to learn skill: ${e.message}", e)
             return null
         }
+    }
+
+    /**
+     * Upload skills learned on this phone that never reached the cloud (offline, server
+     * error, or cloud set up later). Called at app start; a no-op without cloud keys.
+     */
+    suspend fun uploadPending() {
+        if (!SupabaseModule.isConfigured) return
+        val pending = skillPackDao.getUnsynced().filter { !it.isStale }
+        if (pending.isEmpty()) return
+        var done = 0
+        for (skill in pending) {
+            if (cloudApi.uploadSkill(skill)) {
+                skillPackDao.markSynced(skill.skillId)
+                done++
+            }
+        }
+        Log.i(TAG, "☁️ Uploaded $done of ${pending.size} pending skill(s)")
     }
 
     /** Write a variant to Room, disk and RAM, then (optionally) upload it. */

@@ -7,6 +7,7 @@ import android.os.Build
 import com.aura.cloud.SupabaseAuthManager
 import com.aura.skills.OsMigrationHandler
 import com.aura.skills.SkillCache
+import com.aura.skills.SkillLearner
 import com.aura.skills.SkillSeeder
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
@@ -37,6 +38,7 @@ class AURAApplication : Application(), Configuration.Provider {
     @Inject lateinit var skillCache: SkillCache
     @Inject lateinit var osMigrationHandler: OsMigrationHandler
     @Inject lateinit var supabaseAuthManager: SupabaseAuthManager
+    @Inject lateinit var skillLearner: SkillLearner
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID     = "aura_agent_channel"
@@ -58,6 +60,8 @@ class AURAApplication : Application(), Configuration.Provider {
             skillCache.warmUp()
             // Detect Android OS upgrades and mark old skills stale
             osMigrationHandler.checkForOsMigration()
+            // Retry uploads of learned skills that didn't reach the cloud before
+            skillLearner.uploadPending()
         }
     }
 

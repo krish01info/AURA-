@@ -8,6 +8,9 @@ on:
   # Adds a "Run workflow" button on the Actions tab (e.g. after changing repo secrets)
   workflow_dispatch:
 
+permissions:
+  contents: write   # lets CI commit a newly generated Room schema to a PR branch
+
 jobs:
   build:
     name: Build & Test
@@ -33,12 +36,17 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           # Keys come from repo secrets (Settings > Secrets and variables > Actions).
           # Empty if unset — the app then needs a key typed into its Settings screen.
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
           echo "GROQ_API_KEY=$GROQ_API_KEY" >> android/local.properties
           echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> android/local.properties
+          # Optional community skill store (empty = app works offline, nothing uploaded).
+          echo "SUPABASE_URL=$SUPABASE_URL" >> android/local.properties
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> android/local.properties
 
       # Groq retires models often — warn on the PR if one AURA uses is gone.
       - name: Check Groq models are still available
@@ -89,6 +97,42 @@ jobs:
           name: aura-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+      # Room writes android/app/schemas/<db>/<version>.json during the build. A new one
+      # must be committed (the next AutoMigration needs it). On a PR from this repo CI
+      # commits it to the PR branch; otherwise it warns (and the artifact below has it).
+      - name: Commit new Room schema
+        if: success()
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          SAME_REPO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          new=$(git status --porcelain --untracked-files=all -- android/app/schemas | awk '{print $2}')
+          [ -z "$new" ] && { echo "Room schemas up to date"; exit 0; }
+          if [ "$SAME_REPO" != "true" ]; then
+            for f in $new; do echo "::warning title=Room schema not committed::$f — download the room-schemas artifact and commit it"; done
+            exit 0
+          fi
+          tmp=$(mktemp -d)
+          for f in $new; do mkdir -p "$tmp/$(dirname "$f")"; cp "$f" "$tmp/$f"; done
+          git fetch --depth=1 origin "$HEAD_REF"
+          git checkout -f -B "$HEAD_REF" "origin/$HEAD_REF"
+          cp -r "$tmp/android" .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/schemas
+          git commit -m "Add generated Room schema"
+          git push origin "HEAD:$HEAD_REF"
+          echo "::notice title=Room schema committed::$new"
+
+      - name: Upload Room schemas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schemas
+          path: android/app/schemas/
+          retention-days: 7
 
       - name: Upload test results
         if: always()
