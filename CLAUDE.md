@@ -22,12 +22,15 @@ Read it, then only the `package.md` of the package you're changing.
   (53 skills, 30+ apps, intents/links/media keys); phones re-download it from `main` daily.
   **Add/fix an app: edit the JSON, bump `version`, merge** — `AppShortcutsTest` validates it in CI.
   New actions `intent` (allow-list), `media`, `now_playing`, `reply`, `read_notifications` (notification access, optional).
-- ⚠️ Voice rewrite and skill system are **not yet verified on a real phone**. Ask the owner for results/logcat before assuming they work.
+- ⚠️ First phone test (2026-10-11) found: commands with two parts only opened the app, "call X" only dialed,
+  Play Store search missed, saying "no" got stuck, mic flickered on/off. Fixed in the "device-test fixes" PR
+  (compound-command guard in `SkillMatcher`, new `call` action, more Play Store phrases, `ApprovalParser` +
+  "what should I do instead?", wake-session backoff). **Not re-tested on the phone yet** — ask the owner.
 - ⚠️ Cloud (Supabase) isn't configured yet; when it is, run `docs/cloud/supabase_skill_packs.sql` first.
 
 ## Next steps (in priority order)
 
-1. Device-test the assistant and skills; fix what the owner reports.
+1. Re-test on the phone after the device-test fixes; get logcat (`adb logcat -s TaskManager ActionExecutor SkillRouter WakeWordService VoiceManager`) for anything still failing.
 2. **Live tasks** (voice triggers inside any app, e.g. "photo when I say capture" while recording):
    plan in `docs/plans/live-tasks-plan.md`, status **proposed, not started — wait for the owner's go**.
    Before building, get the owner's answers to the plan's §7 decisions (default words, Hindi model,

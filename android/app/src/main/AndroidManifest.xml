@@ -28,6 +28,8 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- Contact lookup ("message Mom") — asked at runtime; AURA works without it -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- "Call Rahul" places the call — asked at runtime; without it AURA taps the dialer's Call button -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
     <!-- ======================================= -->
     <!--     OTA UPDATER PERMISSIONS             -->

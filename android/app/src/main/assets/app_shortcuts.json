@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "note": "AURA app shortcuts. Each entry becomes a built-in skill (no LLM, no screen tapping where possible). Edit and bump 'version'; phones fetch this file daily from GitHub. Step keys: see data/model/ActionStep.kt.",
  "skills": [
   {
@@ -287,11 +287,13 @@
     "phone {contact_name}",
     "dial {contact_name}",
     "make a call to {contact_name}",
-    "ring {contact_name}"
+    "ring {contact_name}",
+    "give {contact_name} a call",
+    "call to {contact_name}"
    ],
    "steps": [
     {
-     "action": "dial",
+     "action": "call",
      "number": "{contact_number}"
     }
    ]
@@ -818,15 +820,35 @@
    "description": "Search the Play Store (you tap Install)",
    "patterns": [
     "find {query} on play store",
-    "install {query}",
+    "search {query} on play store",
+    "search for {query} on play store",
     "search play store for {query}",
-    "download {query} app"
+    "look for {query} on play store",
+    "open play store and search {query}",
+    "open play store and search for {query}",
+    "go to play store and search {query}",
+    "show {query} on play store",
+    "install {query}",
+    "install {query} app",
+    "download {query} app",
+    "get {query} app",
+    "get {query} from play store",
+    "install {query} from play store",
+    "download {query} from play store"
    ],
    "steps": [
     {
      "action": "open_link",
      "pkg": "com.android.vending",
      "uri": "market://search?q={query}&c=apps"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.android.vending"
     }
    ]
   },

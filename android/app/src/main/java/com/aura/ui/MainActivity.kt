@@ -28,7 +28,10 @@ class MainActivity : ComponentActivity() {
         
         // Request necessary runtime permissions
         // Microphone (voice), contacts ("message Mom" → the right person; optional)
-        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS)
+        // Phone calls: "call Rahul" places the call (without it AURA presses the dialer's Call button).
+        val permissions = mutableListOf(
+            Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
