@@ -33,12 +33,17 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           # Keys come from repo secrets (Settings > Secrets and variables > Actions).
           # Empty if unset — the app then needs a key typed into its Settings screen.
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
           echo "GROQ_API_KEY=$GROQ_API_KEY" >> android/local.properties
           echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> android/local.properties
+          # Optional community skill store (empty = app works offline, nothing uploaded).
+          echo "SUPABASE_URL=$SUPABASE_URL" >> android/local.properties
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> android/local.properties
 
       # Groq retires models often — warn on the PR if one AURA uses is gone.
       - name: Check Groq models are still available
@@ -89,6 +94,25 @@ jobs:
           name: aura-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+      # Room writes android/app/schemas/<db>/<version>.json during the build. A new one
+      # must be committed (the next AutoMigration needs it) — warn and publish it.
+      - name: Check Room schema is committed
+        if: always()
+        shell: bash
+        run: |
+          new=$(git status --porcelain -- android/app/schemas | awk '{print $2}')
+          if [ -n "$new" ]; then
+            for f in $new; do echo "::warning title=Room schema not committed::$f — download the room-schemas artifact and commit it"; done
+          fi
+
+      - name: Upload Room schemas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schemas
+          path: android/app/schemas/
+          retention-days: 7
 
       - name: Upload test results
         if: always()
