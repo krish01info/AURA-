@@ -10,8 +10,10 @@ Owns the task execution lifecycle.
 | TimeParser.kt | "7:30 pm" / "5 minutes" → numbers for alarms and timers (pure, tested). |
 | SkillRouter.kt | `findSkill(goal)` → `SkillMatch` (variant + filled steps). L1 RAM → L2 disk → L3 Room → L4 cloud; only variants compatible with this phone whose phrase pattern matches; the most specific phrase wins, then the most specific variant (shortcut steps get a small bonus). Cloud results pass `CloudSkillVetting` first. `null` → LLM plans. |
 | VariantRanking.kt | Pure Kotlin: which variants can run on this phone (`isCompatible`) and how well they fit (`specificity`). Unit-tested. |
+| LiveTaskRunner.kt | Runs a `listen` step: pre-flight (no CRITICAL, HIGH approved once), model download, listen via `voice/KeywordSpotter`, run trigger steps in quick mode, stop on a stop word (runs `on_stop`) / leaving the app 5 s / blocked mic / 3 failed words / timeout / Stop. Publishes `TaskState.Live`. |
+| TriggerMatcher.kt | Pure Kotlin: recognizer text → Fire/Stop events (each spoken word once across partials, cooldown, `once`, phrases, ignores AURA's own voice). Unit-tested. |
 | LockDetector.kt | Pure Kotlin: does screen text look like an app lock / fingerprint / PIN prompt? Unit-tested. Used by `ActionExecutor.lockScreenInFront()`. |
-| TaskState.kt | Sealed states: Created / Planning / Executing / WaitingForUnlock / WaitingForUser / Verifying / Completed / Failed / Cancelled |
+| TaskState.kt | Sealed states: Created / Planning / Executing / Live / WaitingForUnlock / WaitingForUser / Verifying / Completed / Failed / Cancelled |
 
 ## Key flow in TaskManager
 1. Sanitize goal; stop early with a spoken reason if `setupProblem()` is not null

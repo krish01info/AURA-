@@ -8,9 +8,10 @@
 | VoicePrefs.kt | Speech language setting (phone default / English (India) / Hindi / English (US)). Wake listener uses en-IN when Hindi is chosen. |
 | ApprovalParser.kt | Pure Kotlin: reads a spoken answer to "Allow this?" (yes / no / "no, call Rohit instead"), English + Hindi. Unit-tested. |
 | FloatingBubble.kt | Draggable mic bubble overlay; tap → `WakeWordService.listenNow`. |
-| VoskEngine.kt | Offline STT — **stub**, not used (Vosk dependency not added). |
+| KeywordSpotter.kt | Live tasks: offline Vosk keyword spotting in AURA's own process (grammar = only the trigger words), Indian-English model downloaded once (~36 MB, `ensureModel`), detects when another app silences the mic. Audio is never stored. |
 
 ## Rules
+- During a live task the `KeywordSpotter` owns the mic: `startWake` does nothing while `TaskState.Live`, and the banner must stay on screen (a visible accessibility overlay is what lets AURA share the mic with the app in front).
 - Only one SpeechRecognizer may run at a time. All listening goes through `WakeWordService`; don't start recognition from ViewModels.
 - A microphone foreground service may only be started while AURA is in the foreground (Android 14+). The helpers catch the error if not.
 - Wake detection: SpeechRecognizer loop, on-device recognizer when available; system start-beeps muted on restarts (never while music plays — only streams AURA muted are restored). No listening during a task. Planned upgrade: Picovoice Porcupine.

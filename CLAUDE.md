@@ -37,10 +37,11 @@ Read it, then only the `package.md` of the package you're changing.
 ## Next steps (in priority order)
 
 1. Re-test on the phone after the device-test fixes; get logcat (`adb logcat -s TaskManager ActionExecutor SkillRouter WakeWordService VoiceManager`) for anything still failing.
-2. **Live tasks** (voice triggers inside any app, e.g. "photo when I say capture" while recording):
-   plan in `docs/plans/live-tasks-plan.md`, status **proposed, not started — wait for the owner's go**.
-   Before building, get the owner's answers to the plan's §7 decisions (default words, Hindi model,
-   timeout, mic-test screen). Start with Phase 0 (mic test on the owner's phone).
+2. **Live tasks — built, not phone-tested** (`docs/plans/live-tasks-plan.md`). Owner's choices: words start /
+   capture / stop, English (India) model only, no time limit (until "stop"), no mic-test screen. Test on the phone:
+   "voice camera" → say capture; "record a video and take photos when I say capture"; "hands free scrolling" in
+   Chrome; "hands free reels". If the camera app silences AURA while recording video, build plan Phase 8
+   (AURA's own CameraX screen). Possible later: a Settings button to pre-download the voice model.
 3. Porcupine wake word (beeps + battery). Blocked on the owner: needs a free Picovoice AccessKey and a custom
    "Hey AURA" keyword file (.ppn, Android) from console.picovoice.ai. Then: add `ai.picovoice:porcupine-android`,
    key field in Settings, run Porcupine in `WakeWordService` instead of the SpeechRecognizer wake loop

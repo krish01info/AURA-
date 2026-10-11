@@ -7,6 +7,23 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Added — live tasks (keep listening inside any app)
+- Say "voice camera", "take a photo when I say cheese", "record a video and take photos when I say capture",
+  "hands free scrolling", "hands free reels" or "hands free music": AURA keeps listening offline and acts on each word
+  until you say "stop"
+- New `listen` step (triggers / stop_words / on_stop); the planner can create live tasks for any app, saved as skills
+- Offline keyword spotting with Vosk in AURA's own process (Indian-English model, ~36 MB, downloaded on first use);
+  tells you if the app in front blocks the microphone
+- Safety: steps that run on a word never send, pay or delete; anything needing approval is approved once up front
+- Ends on "stop", leaving the app, 3 failed words, a blocked mic, or Stop in the popup / notification
+
+### Added — popup controls and phone-test fixes
+- Stop button while working, Wrong after Done (forgets that skill), waits for app locks ("Unlock the app")
+- "Call X" places the call; two-part commands no longer stop after opening the app; more Play Store phrases;
+  saying "no" asks what to do instead; calmer mic
+- Fixed: "send my notes to Rahul", "add a new task" were rejected as attacks
+- Cloud: downloaded skills are vetted before running; rows are owner-only; failed uploads retry
+
 ### Added — app shortcuts for many apps
 - Built-in skills are now data: `assets/app_shortcuts.json` (53 skills, 30+ apps) — WhatsApp, Telegram, Instagram, X, Spotify, YouTube Music, JioSaavn, YouTube, Maps, Uber, Amazon, Flipkart, Play Store, Gmail, Calendar, Camera, Zomato, UPI, 8 settings panels…
 - Phones re-download the file from GitHub daily (`AppShortcutsUpdater`); a higher `version` replaces built-ins without an app update. Removed entries are deleted.
