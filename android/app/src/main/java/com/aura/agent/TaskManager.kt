@@ -9,6 +9,7 @@ import com.aura.llm.ApiKeyStore
 import com.aura.llm.GeminiClient
 import com.aura.llm.GroqClient
 import com.aura.llm.LlmException
+import com.aura.llm.Plan
 import com.aura.memory.MemoryManager
 import com.aura.policy.AppPermissionManager
 import com.aura.policy.AnomalyDetector
@@ -19,6 +20,7 @@ import com.aura.policy.PolicyEngine
 import com.aura.policy.PromptInjectionDefender
 import com.aura.policy.ValidationResult
 import com.aura.skills.SkillLearner
+import com.aura.skills.SkillMatcher
 import com.aura.skills.SkillUpdater
 import com.aura.voice.VoiceManager
 import kotlinx.coroutines.CancellationException
@@ -31,8 +33,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -78,7 +78,6 @@ class TaskManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentJob: Job? = null
-    private val json = Json { ignoreUnknownKeys = true }
 
     /** Observable state — the UI and the assistant popup collect this. */
     private val _state = MutableStateFlow<TaskState>(TaskState.Created)
@@ -192,7 +191,8 @@ class TaskManager @Inject constructor(
      */
     fun setupProblem(): String? = when {
         !actionExecutor.isBound -> ACCESSIBILITY_OFF
-        !apiKeyStore.hasAnyKey() -> "I need an AI key first. Add a Groq or Gemini API key in AURA's Settings."
+        // No API key is fine here: stored skills run without one. The LLM step
+        // explains the missing key only if a new task actually needs planning.
         else -> null
     }
 
@@ -214,47 +214,50 @@ class TaskManager @Inject constructor(
             _state.value = TaskState.Planning
             Log.i(TAG, "Planning task [$taskId]: $goal")
 
-            // 1. Stored skill (L1 RAM → L2 disk → L3 Room) — no LLM call needed
-            val cachedSkill = skillRouter.findBestSkill(goal)
-            val cachedSteps = cachedSkill?.let { skill ->
-                try {
-                    json.decodeFromString(ListSerializer(ActionStep.serializer()), skill.steps)
-                } catch (_: Exception) { emptyList() }
-            }?.takeIf { it.isNotEmpty() }
-
-            if (cachedSkill != null && cachedSteps != null) {
-                Log.i(TAG, "Using stored skill ${cachedSkill.skillId} (${cachedSteps.size} steps)")
-                when (val outcome = runStepsInternal(taskId, goal, cachedSteps)) {
+            // 1. Stored skill: RAM → disk → Room → cloud. No LLM call when found.
+            val match = skillRouter.findSkill(goal)
+            if (match != null) {
+                Log.i(TAG, "Using stored skill ${match.skill.skillId} from ${match.layer} (${match.steps.size} steps)")
+                when (val outcome = runStepsInternal(taskId, goal, match.steps)) {
                     RunOutcome.Success -> {
-                        scope.launch { skillUpdater.recordSuccess(cachedSkill.skillId) }
+                        scope.launch { skillUpdater.recordSuccess(match.skill.skillId) }
                         return
                     }
                     RunOutcome.Stopped -> return
                     is RunOutcome.StepFailed -> {
                         // Self-heal: record the failure, then re-plan with the LLM once.
+                        // The new plan is saved as this phone's variant (see SkillLearner).
                         Log.w(TAG, "Stored skill failed (${outcome.reason}) — re-planning with LLM")
-                        scope.launch { skillUpdater.handleFailure(cachedSkill.skillId, goal) }
+                        scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
                         voiceManager.speak("That didn't work. Let me try another way.", flush = false)
                         _state.value = TaskState.Planning
                     }
                 }
             }
 
-            // 2. LLM plan (Groq → Gemini)
-            val steps = planWithLlm(goal)
+            // 2. LLM plan (Groq → Gemini) — only when no stored skill fits
+            val plan = planWithLlm(goal)
 
-            val clarify = steps.firstOrNull { it.action == ActionStep.CLARIFY }
+            val clarify = plan.steps.firstOrNull { it.action == ActionStep.CLARIFY }
             if (clarify != null) {
                 fail(taskId, goal, clarify.clarification ?: "Can you say that more specifically?")
                 return
             }
 
+            // Steps to run = template with this goal's values filled in.
+            // Template to save = the same steps with values turned back into {slot}s.
+            val steps = SkillMatcher.fill(plan.steps, plan.params)
+            if (steps == null) {
+                fail(taskId, goal, "I couldn't plan that properly. Please try saying it another way.")
+                return
+            }
+            val template = SkillMatcher.templatize(steps, plan.params)
+
             Log.i(TAG, "Plan ready — ${steps.size} steps: ${steps.map { it.action }}")
             when (val outcome = runStepsInternal(taskId, goal, steps)) {
                 RunOutcome.Success -> {
-                    // Only now is the plan known to work — save it as a skill.
-                    val appPkg = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
-                    scope.launch { skillLearner.learnFromSuccess(goal, steps, appPkg) }
+                    // Only now is the plan known to work — save it as a skill for this phone.
+                    scope.launch { skillLearner.learn(goal, plan, template) }
                 }
                 is RunOutcome.StepFailed -> fail(taskId, goal, outcome.reason)
                 RunOutcome.Stopped -> { /* state already set */ }
@@ -274,7 +277,7 @@ class TaskManager @Inject constructor(
      * Plan with Groq; if it fails (or has no key) and a Gemini key exists, use Gemini.
      * @throws LlmException with the most useful user-readable reason.
      */
-    private suspend fun planWithLlm(goal: String): List<ActionStep> {
+    private suspend fun planWithLlm(goal: String): Plan {
         val memoryContext = memoryManager.buildContextString(goal)
         val uiSnapshot = actionExecutor.getUiSnapshot()
 
@@ -296,7 +299,9 @@ class TaskManager @Inject constructor(
                 throw groqError ?: e
             }
         }
-        throw groqError ?: LlmException("No AI key set. Add a Groq or Gemini key in Settings.")
+        throw groqError ?: LlmException(
+            "I don't know how to do that yet, and I need an AI key to learn it. Add a Groq or Gemini key in Settings."
+        )
     }
 
     // ──────────────────────────────────────────────────────────────

@@ -7,6 +7,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 private const val TAG = "PlannerPrompt"
 
@@ -16,13 +18,40 @@ private const val TAG = "PlannerPrompt"
  *
  * The prompt lists the exact JSON keys that [ActionStep] reads. If you add a field
  * or action to ActionStep, update [SYSTEM] too — the model can only use what it is told.
+ *
+ * Besides the steps, the same single call returns what's needed to save the plan
+ * as a reusable skill (no extra API call): the task identity, the variable values
+ * ("params") and phrase patterns used later to match new goals on the phone.
  */
+/**
+ * A parsed planner reply.
+ * @param steps    steps to run; values may appear literally or as `{slot}`
+ * @param params   variable parts of the goal, e.g. {"contact_name":"Priya"}
+ * @param patterns ways to say this task with `{slot}`s, e.g. "message {contact_name} {message_text}"
+ */
+data class Plan(
+    val steps: List<ActionStep>,
+    val app: String? = null,
+    val category: String? = null,
+    val action: String? = null,
+    val params: Map<String, String> = emptyMap(),
+    val patterns: List<String> = emptyList()
+)
+
 object PlannerPrompt {
 
-    /** Compact on purpose: it is sent with every planning call (~250 tokens). */
+    /** Compact on purpose: it is sent with every planning call (~400 tokens). */
     val SYSTEM = """
 You are AURA, an Android phone automation agent. Plan the steps to reach the user's goal.
-Reply with ONLY a JSON object: {"steps":[ ... ]}. No prose, no markdown.
+Reply with ONLY one JSON object, no prose, no markdown:
+{"intent":{"app":"<package>","category":"<e.g. messaging>","action":"<e.g. send_message>"},
+ "params":{"<slot>":"<value copied exactly from the goal>"},
+ "patterns":["<the goal with each param value replaced by {slot}>","<1-2 other common ways to say it>"],
+ "steps":[ ... ]}
+
+params = the variable parts of the goal (contact, message, search text, amount, place…).
+Use snake_case slot names (contact_name, message_text, query, amount, place). No variable parts → "params":{}.
+In steps, write {slot} wherever a param value goes.
 
 Step objects (use exactly these keys):
 - {"action":"open_app","pkg":"<android package, e.g. com.whatsapp>","text":"<app name>"}
@@ -67,11 +96,11 @@ Rules:
     }
 
     /**
-     * Parse a model reply into steps. Accepts {"steps":[...]}, a bare array,
-     * or either of those wrapped in markdown fences / extra text.
-     * Returns an empty list if nothing usable is found.
+     * Parse a model reply. Accepts the full object, {"steps":[...]}, a bare array,
+     * or any of those wrapped in markdown fences / extra text.
+     * Returns a Plan with empty steps if nothing usable is found.
      */
-    fun parseSteps(raw: String): List<ActionStep> {
+    fun parsePlan(raw: String): Plan {
         val cleaned = raw.trim()
             .removePrefix("```json").removePrefix("```JSON").removePrefix("```")
             .removeSuffix("```")
@@ -81,21 +110,23 @@ Rules:
             ?: extract(cleaned, '[', ']')?.let(::tryParse)
             ?: run {
                 Log.e(TAG, "No JSON found in model reply: ${raw.take(300)}")
-                return emptyList()
+                return Plan(emptyList())
             }
 
-        val array: JsonArray = when (element) {
+        val obj = element as? JsonObject
+        val array: JsonArray? = when (element) {
             is JsonArray -> element
             is JsonObject -> (element["steps"] ?: element["actions"]
                 ?: element.values.firstOrNull { it is JsonArray }) as? JsonArray
                 ?: if (element["action"] != null) JsonArray(listOf(element)) else null
             else -> null
-        } ?: run {
+        }
+        if (array == null) {
             Log.e(TAG, "No steps array in model reply: ${raw.take(300)}")
-            return emptyList()
+            return Plan(emptyList())
         }
 
-        return try {
+        val steps = try {
             json.decodeFromJsonElement(ListSerializer(ActionStep.serializer()), array)
                 .filter { it.action.isNotBlank() }
                 .map { it.copy(action = it.action.trim().lowercase()) }
@@ -103,7 +134,31 @@ Rules:
             Log.e(TAG, "Could not decode steps: ${e.message} — ${raw.take(300)}")
             emptyList()
         }
+
+        val intent = obj?.get("intent") as? JsonObject
+        val params = (obj?.get("params") as? JsonObject)
+            ?.mapNotNull { (k, v) ->
+                val value = (v as? JsonPrimitive)?.contentOrNull?.trim()
+                if (k.isBlank() || value.isNullOrEmpty()) null else k.trim() to value
+            }
+            ?.toMap()
+            .orEmpty()
+        val patterns = (obj?.get("patterns") as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { p -> p.isNotEmpty() } }
+            .orEmpty()
+
+        return Plan(
+            steps = steps,
+            app = (intent?.get("app") as? JsonPrimitive)?.contentOrNull,
+            category = (intent?.get("category") as? JsonPrimitive)?.contentOrNull,
+            action = (intent?.get("action") as? JsonPrimitive)?.contentOrNull,
+            params = params,
+            patterns = patterns
+        )
     }
+
+    /** Steps only (kept for callers that don't need the skill metadata). */
+    fun parseSteps(raw: String): List<ActionStep> = parsePlan(raw).steps
 
     private fun tryParse(s: String): JsonElement? =
         try { json.parseToJsonElement(s) } catch (_: Exception) { null }

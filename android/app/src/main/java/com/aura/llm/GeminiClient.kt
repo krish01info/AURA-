@@ -1,7 +1,6 @@
 package com.aura.llm
 
 import android.util.Log
-import com.aura.data.model.ActionStep
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -78,7 +77,7 @@ class GeminiClient @Inject constructor(
         goal: String,
         uiContext: String,
         memoryContext: String = ""
-    ): List<ActionStep> {
+    ): Plan {
         val key = apiKeyStore.geminiKey()
         if (key.isBlank()) throw LlmException("No Gemini API key set.")
 
@@ -110,10 +109,10 @@ class GeminiClient @Inject constructor(
                 .orEmpty()
             if (rawText.isBlank()) throw LlmException("Gemini returned an empty answer.")
 
-            val steps = PlannerPrompt.parseSteps(rawText)
-            if (steps.isEmpty()) throw LlmException("Gemini's answer couldn't be understood.")
-            Log.i(TAG, "✅ Gemini returned ${steps.size} steps: ${steps.map { it.action }}")
-            return steps
+            val plan = PlannerPrompt.parsePlan(rawText)
+            if (plan.steps.isEmpty()) throw LlmException("Gemini's answer couldn't be understood.")
+            Log.i(TAG, "✅ Gemini returned ${plan.steps.size} steps: ${plan.steps.map { it.action }}")
+            return plan
 
         } catch (e: LlmException) {
             throw e

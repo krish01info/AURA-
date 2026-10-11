@@ -30,6 +30,10 @@ interface SkillPackDao {
     @Query("SELECT * FROM skill_packs WHERE skillId = :skillId")
     suspend fun getSkill(skillId: String): SkillPackEntity?
 
+    /** Every variant (all OS / skin / app versions) of one task. */
+    @Query("SELECT * FROM skill_packs WHERE intentId = :intentId")
+    suspend fun getVariantsForIntent(intentId: String): List<SkillPackEntity>
+
     /** Top N skills by usage — used by SkillCache.warmUp() to fill L1 RAM cache. */
     @Query("SELECT * FROM skill_packs ORDER BY usageCount DESC LIMIT :limit")
     suspend fun getTopSkillsByUsage(limit: Int): List<SkillPackEntity>

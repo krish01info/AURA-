@@ -1,23 +1,36 @@
 package com.aura.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 /**
- * SkillPackEntity — a cached, reusable action plan for a recurring goal.
+ * SkillPackEntity — one **variant** of a reusable skill: the steps for one task
+ * (intent) in one environment (OEM skin + Android version group + app major version).
  *
- * Stored in Room DB as the local skill cache (L2).
- * Every successful LLM-planned task is auto-saved as a skill.
- * Skills are also downloaded from Supabase cloud for community sharing.
+ *   intentId  = hash(appPackage, intentCategory, intentAction)        — the task
+ *   skillId   = hash(intentId, osSkin, osClassTag, appMajorVersion)   — this variant
  *
- * Lookup chain: L1 RAM cache → L2 Room DB → L3 Supabase cloud → Groq LLM
+ * So "send WhatsApp message" can have a OneUI/Android 14 variant, a MIUI/Android 13
+ * variant and a universal one side by side. See `SkillIdentity` for the IDs and
+ * `agent/SkillRouter` for how a variant is chosen for this phone.
  *
- * OS Classification fields enable device-specific skill filtering —
- * users only download skills compatible with their Android version and OEM skin.
+ * [steps] is a template: values from the goal appear as `{slot}` and are filled
+ * from [phrasePatterns] at run time by `SkillMatcher` — no LLM call needed.
+ *
+ * Lookup chain: L1 RAM → L2 disk → L3 Room → L4 Supabase cloud → LLM creates it.
+ * @Serializable because the disk cache stores each variant as a JSON file.
  */
-@Entity(tableName = "skill_packs")
+@Serializable
+@Entity(tableName = "skill_packs", indices = [Index("intentId")])
 data class SkillPackEntity(
-    @PrimaryKey val skillId: String,          // canonical hash — never changes
+    @PrimaryKey val skillId: String,          // variant hash — see class doc
+
+    // ── Task identity (shared by all variants of the same task) ──
+    @ColumnInfo(defaultValue = "")
+    val intentId: String = "",                // hash(appPackage, intentCategory, intentAction)
 
     // ── Identity ──────────────────────────────────────────────────
     val appPackage: String,                   // "com.whatsapp"
@@ -26,11 +39,13 @@ data class SkillPackEntity(
     val displayName: String = "",             // "WhatsApp Send Message"
 
     // ── Matching ──────────────────────────────────────────────────
-    val triggerKeywords: String,              // JSON: ["whatsapp","message","text"]
-    val parameters: String = "[]",           // JSON: param schema
+    val triggerKeywords: String,              // JSON: ["whatsapp","message","text"] — fixed words of the patterns
+    val parameters: String = "[]",           // JSON: slot names, e.g. ["contact_name","message_text"]
+    @ColumnInfo(defaultValue = "[]")
+    val phrasePatterns: String = "[]",       // JSON: ["send {message_text} to {contact_name} on whatsapp", …]
 
     // ── Execution ─────────────────────────────────────────────────
-    val steps: String,                        // JSON: List<ActionStep>
+    val steps: String,                        // JSON: List<ActionStep> template with {slot}s
     val riskLevel: String = "MEDIUM",        // LOW | MEDIUM | HIGH | CRITICAL
 
     // ── OS Classification (SKILL-SYSTEM.md) ───────────────────────
@@ -43,7 +58,8 @@ data class SkillPackEntity(
 
     // ── Device Scoping ────────────────────────────────────────────
     val deviceModel: String? = null,         // "SM-G991B" | null (any device)
-    val appVersion: String? = null,          // "2.24.1.76" | null
+    val appVersion: String? = null,          // "2.24.1.76" | null — full version it was made on
+    val appMajorVersion: String? = null,     // "2" | null (any) — part of the variant key
 
     // ── Quality Signals ───────────────────────────────────────────
     val version: Int = 1,

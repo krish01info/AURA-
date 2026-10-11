@@ -31,6 +31,24 @@ object SkillIdentity {
     }
 
     /**
+     * ID of one variant of a task: the same task on a different skin, Android
+     * version group or app major version gets a different ID, so variants never
+     * overwrite each other. `null` skin / app version mean "any".
+     */
+    fun variantId(
+        intentId: String,
+        osSkin: String?,
+        osClassTag: String,
+        appMajorVersion: String?
+    ): String = "$intentId::${osSkin ?: "any"}::$osClassTag::${appMajorVersion ?: "any"}"
+        .sha256().take(20)
+
+    /** Normalise an LLM-provided category/action into a stable snake_case token. */
+    fun cleanToken(value: String?, fallback: String): String =
+        value?.lowercase()?.replace(Regex("[^a-z0-9]+"), "_")?.trim('_')?.takeIf { it.isNotEmpty() }
+            ?: fallback
+
+    /**
      * Infer intent category + action from a user goal using keyword heuristics.
      * Used when generating skill IDs from LLM-planned tasks.
      *

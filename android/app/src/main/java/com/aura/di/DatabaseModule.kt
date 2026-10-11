@@ -33,6 +33,8 @@ object DatabaseModule {
             AURADatabase::class.java,
             "aura_database"
         )
+            // 6 → 7 is an auto-migration declared on AURADatabase (keeps user data).
+            // Older versions (no exported schema) are still recreated from scratch.
             .fallbackToDestructiveMigration()
             .build()
     }

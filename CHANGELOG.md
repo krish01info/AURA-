@@ -7,6 +7,23 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Changed — skill system (database v7)
+- Skills are stored per **variant**: task × OEM skin × Android version group × app major version, so different phones keep their own steps
+- Stored skills run with **no LLM call**: phrase patterns ("send {message_text} to {contact_name} on whatsapp") are matched on the phone and fill the step template
+- One lookup chain: RAM (most used) → disk → Room → cloud (compatible variants only) → LLM creates, then saved to every layer
+- The LLM call also returns intent, params and patterns, so learning a skill costs no extra API call
+- A failing stored variant is re-planned and replaced for this phone only (version + 1); new phrasings are shared across variants
+- Room auto-migration 6 → 7 keeps all other data; old unsafe skill rows are cleared
+- Cloud schema: `docs/cloud/supabase_skill_packs.sql`
+
+### Fixed — skills
+- Disk cache never stored anything (`SkillPackEntity` wasn't `@Serializable`)
+- Seed skills tapped literal `{contact_name}` (placeholders were never filled); learned skills replayed old contacts/messages
+- Any shared word (e.g. "open") could trigger an unrelated skill — a phrase pattern must now match
+- Repairs were thrown away (an existing skill ID blocked saving the fixed plan)
+- A single failure could permanently disable a skill; now needs ≥2 failures
+- Seeds had invented usage/verified stats; removed the Google Pay seed (it never completed a payment)
+
 ### Fixed — voice assistant and tasks
 - Voice never worked on Android 11+: added `<queries>` so the speech recognizer (and other apps for `open_app`) are visible
 - Wake-word loop restarted the mic every 0.3 s, so "Hey AURA" could never be heard; now restarts only when a session ends

@@ -3,7 +3,6 @@ package com.aura.skills
 import android.util.Log
 import com.aura.cloud.SupabaseSkillApi
 import com.aura.data.db.SkillPackDao
-import com.aura.data.model.ActionStep
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,7 +25,7 @@ private const val TAG = "SkillUpdater"
 class SkillUpdater @Inject constructor(
     private val localDao: SkillPackDao,
     private val skillHealthMonitor: SkillHealthMonitor,
-    private val skillLearner: SkillLearner,
+    private val skillCache: SkillCache,
     private val cloudApi: SupabaseSkillApi
 ) {
 
@@ -71,30 +70,13 @@ class SkillUpdater @Inject constructor(
         return health
     }
 
-    /**
-     * Repair a skill with a new set of steps after LLM re-planned successfully.
-     * Bumps the version number so cloud users know there's a fix.
-     */
-    suspend fun repairSkill(
-        skillId: String,
-        newSteps: List<ActionStep>,
-        goal: String,
-        appPackage: String
-    ) {
-        val existing = localDao.getSkill(skillId)
-        val newVersion = (existing?.version ?: 0) + 1
-        localDao.markRepaired(skillId, newVersion)
-        // Re-learn with fresh OS tags — SkillLearner handles canonical ID dedup
-        skillLearner.learnFromSuccess(goal, newSteps, appPackage)
-        Log.i(TAG, "🔧 Repaired skill: $skillId → v$newVersion")
-    }
-
     // ── Cloud update check ────────────────────────────────────────
     private suspend fun checkForCloudUpdate(skillId: String) {
         val local = localDao.getSkill(skillId) ?: return
         val cloudSkill = cloudApi.getLatestVersion(skillId, local.version)
         if (cloudSkill != null) {
             localDao.upsert(cloudSkill)
+            skillCache.invalidate(skillId) // next lookup reloads the new version from Room
             Log.i(TAG, "Silent update: $skillId v${local.version} → v${cloudSkill.version}")
         } else {
             Log.d(TAG, "No cloud update for $skillId (already at latest)")

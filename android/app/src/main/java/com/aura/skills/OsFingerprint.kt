@@ -1,7 +1,10 @@
 package com.aura.skills
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,7 +20,9 @@ private const val TAG = "OsFingerprint"
  *  - OsMigrationHandler → detects Android upgrades
  */
 @Singleton
-class OsFingerprint @Inject constructor() {
+class OsFingerprint @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     val apiLevel: Int = Build.VERSION.SDK_INT
     val osVersion: String = Build.VERSION.RELEASE
@@ -36,6 +41,22 @@ class OsFingerprint @Inject constructor() {
         in 34..99 -> "android_14_plus"
         else     -> "universal"
     }
+
+    /** Installed version name of [packageName] ("2.24.1.76"), or null if not installed. */
+    fun appVersion(packageName: String): String? = try {
+        context.packageManager.getPackageInfo(packageName, 0).versionName
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Major version of an installed app ("2" for "2.24.1.76"). Part of a skill
+     * variant's key, because app updates move buttons more often than Android does.
+     */
+    fun appMajorVersion(packageName: String): String? =
+        appVersion(packageName)?.trim()?.substringBefore('.')?.takeIf { it.isNotEmpty() }
 
     override fun toString(): String =
         "Android $osVersion (API $apiLevel) | $deviceModel | $osSkin ${skinVersion ?: ""}"
