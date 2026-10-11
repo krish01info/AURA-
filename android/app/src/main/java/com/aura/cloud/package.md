@@ -12,4 +12,5 @@ Supabase layer. Everything here is optional: when `SupabaseModule.isConfigured` 
 - Always check `SupabaseModule.isConfigured` before a network call.
 - Client setup lives in `di/SupabaseModule.kt`.
 - Cloud schema: `docs/cloud/supabase_skill_packs.sql` (run once in Supabase; idempotent). Keep it in sync with `CloudSkill`.
+- Trust: a row belongs to the account that first uploaded it (`owner_id`); only it may change the row, and a trigger stops clients setting `is_verified`/`downloads`. Phones vet every download (`skills/CloudSkillVetting`). Uploading to a variant someone else owns fails quietly — expected.
 - Deferred work (Realtime, pgvector): `docs/plans/roadmap.md`.

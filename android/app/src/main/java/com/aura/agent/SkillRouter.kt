@@ -6,6 +6,7 @@ import com.aura.data.db.SkillPackDao
 import com.aura.data.model.ActionStep
 import com.aura.data.model.SkillPackEntity
 import com.aura.skills.OsFingerprint
+import com.aura.skills.CloudSkillVetting
 import com.aura.skills.SkillCache
 import com.aura.skills.SkillDiskCache
 import com.aura.skills.SkillMatcher
@@ -96,7 +97,13 @@ class SkillRouter @Inject constructor(
         }
 
         // ── L4: cloud (download) ──────────────────────────────────
+        // Anyone can upload: only downloaded skills that can't do anything risky unasked are used.
         val cloudCandidates = cloudApi.searchSkills(keywords, os.osClassTag, os.osSkin).orEmpty()
+            .filter { skill ->
+                val problem = CloudSkillVetting.problem(skill)
+                if (problem != null) Log.w(TAG, "Ignoring cloud skill ${skill.skillId}: $problem")
+                problem == null
+            }
         best(goal, cloudCandidates)?.let { m ->
             localDao.upsert(m.skill)
             diskCache.put(m.skill)

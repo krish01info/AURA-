@@ -22,7 +22,8 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 | File | Role |
 |---|---|
 | SkillMatcher.kt | Pure Kotlin: normalize goals, match patterns → params, fill/templatize steps, derive & validate patterns. Unit-tested. |
-| SkillLearner.kt | Saves/updates a variant after a successful LLM plan (Room + disk + RAM + cloud upload). |
+| SkillLearner.kt | Saves/updates a variant after a successful LLM plan (Room + disk + RAM + cloud upload); returns its id. `uploadPending()` (app start) retries uploads that failed. |
+| CloudSkillVetting.kt | Checks a downloaded community skill before it may run: known actions, allowed intents/link schemes, and no Send/Pay/Delete-type tap or UPI link without a `confirm_send` first. Unit-tested. |
 | SkillIdentity.kt | `generateCanonicalId` (task/intent id), `variantId`, intent heuristics. |
 | SkillCache.kt | L1 RAM: LRU of the ~20 most-used variants (warmed at startup). |
 | SkillDiskCache.kt | L2 disk: one JSON file per variant + keyword index (`filesDir/skill_disk_cache/`). Warmed with the next 200. |

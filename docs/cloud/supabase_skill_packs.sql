@@ -67,18 +67,48 @@ CREATE TABLE IF NOT EXISTS skill_executions (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Row-level security: anyone can read; signed-in (incl. anonymous) users can write.
+-- ── Trust: who may write what ──────────────────────────────────────────────
+-- Each row belongs to the account that first uploaded it (the app signs in anonymously).
+-- Only that account may change it, so nobody can overwrite a skill other phones rely on.
+-- Phones also vet every downloaded skill before running it (skills/CloudSkillVetting.kt).
+ALTER TABLE skill_packs ADD COLUMN IF NOT EXISTS owner_id UUID DEFAULT auth.uid();
+
+-- Clients may not mark their own uploads verified, or fake download counts.
+CREATE OR REPLACE FUNCTION skill_packs_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+        IF TG_OP = 'INSERT' THEN
+            NEW.owner_id    := auth.uid();
+            NEW.is_verified := false;
+            NEW.downloads   := 0;
+        ELSE
+            NEW.owner_id    := OLD.owner_id;
+            NEW.is_verified := OLD.is_verified;
+            NEW.downloads   := OLD.downloads;
+        END IF;
+        NEW.created_by := 'community';
+    END IF;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS skill_packs_guard ON skill_packs;
+CREATE TRIGGER skill_packs_guard BEFORE INSERT OR UPDATE ON skill_packs
+    FOR EACH ROW EXECUTE FUNCTION skill_packs_guard();
+
+-- Row-level security: anyone can read; signed-in (incl. anonymous) users can add rows
+-- and change only their own.
 ALTER TABLE skill_packs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE skill_executions ENABLE ROW LEVEL SECURITY;
+-- Replace the old "anyone may update anything" policies.
+DROP POLICY IF EXISTS skill_packs_write  ON skill_packs;
+DROP POLICY IF EXISTS skill_packs_update ON skill_packs;
 DO $$ BEGIN
     CREATE POLICY skill_packs_read  ON skill_packs FOR SELECT USING (true);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-    CREATE POLICY skill_packs_write ON skill_packs FOR INSERT TO authenticated WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-    CREATE POLICY skill_packs_update ON skill_packs FOR UPDATE TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE POLICY skill_packs_write ON skill_packs FOR INSERT TO authenticated
+    WITH CHECK (owner_id IS NULL OR owner_id = auth.uid());
+CREATE POLICY skill_packs_update ON skill_packs FOR UPDATE TO authenticated
+    USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
 DO $$ BEGIN
     CREATE POLICY skill_exec_insert ON skill_executions FOR INSERT TO authenticated WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

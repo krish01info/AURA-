@@ -90,6 +90,11 @@ class SkillUpdater @Inject constructor(
     private suspend fun checkForCloudUpdate(skillId: String) {
         val local = localDao.getSkill(skillId) ?: return
         val cloudSkill = cloudApi.getLatestVersion(skillId, local.version)
+        val problem = cloudSkill?.let { CloudSkillVetting.problem(it) }
+        if (problem != null) {
+            Log.w(TAG, "Ignoring cloud update for $skillId: $problem")
+            return
+        }
         if (cloudSkill != null) {
             localDao.upsert(cloudSkill)
             skillCache.invalidate(skillId) // next lookup reloads the new version from Room
