@@ -39,6 +39,11 @@ class UIObserver @Inject constructor() {
 
     /** uptimeMillis of the last event that changed what's on screen. */
     @Volatile private var lastChangeAt = 0L
+    @Volatile private var ownScreenInFront = false
+
+    /** Number of screen changes seen so far — compare before/after an action. */
+    @Volatile var changeCount = 0L
+        private set
 
     fun attach(accessibilityService: AccessibilityService) { service = accessibilityService }
     fun detach() { service = null }
@@ -46,14 +51,26 @@ class UIObserver @Inject constructor() {
     /** Called from [AURAAccessibilityService.onAccessibilityEvent] — must stay cheap. */
     fun onEvent(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString()
-        // AURA's own popup updates while a task runs — that isn't the target app changing.
-        if (pkg != null && pkg == service?.packageName) return
+        val own = pkg != null && pkg == service?.packageName
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) {
+            // Track whether AURA's own screen is in front (vs. only its popup overlay).
+            val cls = event.className?.toString().orEmpty()
+            if (!own) ownScreenInFront = false
+            else if (cls.endsWith("Activity")) ownScreenInFront = true
+        }
+        // AURA's popup updates while a task runs in another app — that isn't the app changing.
+        if (own && !ownScreenInFront) return
         pkg?.let { _currentPackage.value = it }
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> lastChangeAt = SystemClock.uptimeMillis()
+            AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_SELECTED -> {
+                lastChangeAt = SystemClock.uptimeMillis()
+                changeCount++
+            }
         }
     }
 
@@ -71,6 +88,19 @@ class UIObserver @Inject constructor() {
             if (now - lastChangeAt >= quietMs) return
             delay(100)
         }
+    }
+
+    /**
+     * Wait up to [timeoutMs] for any screen change after [sinceCount] (see [changeCount]).
+     * Note: a click by itself (TYPE_VIEW_CLICKED) is not a change — the screen must react.
+     */
+    suspend fun waitForChange(sinceCount: Long, timeoutMs: Long = 2000): Boolean {
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < end) {
+            if (changeCount > sinceCount) return true
+            delay(50)
+        }
+        return changeCount > sinceCount
     }
 
     /** A role-tagged description of the screen in front, built now. */

@@ -205,7 +205,7 @@ Any state ──(stop)──► [Cancelled]
 - **Encrypted API keys** — stored with `EncryptedSharedPreferences` (AES-256-GCM, Android Keystore).
 - **TLS** — all network calls use HTTPS.
 - **Audit log** — every auto-run, approved or denied step is recorded.
-- **Emergency stop** — the STOP button, or say *"Hey AURA, stop"*.
+- **Emergency stop** — the STOP button in the app, Cancel in the popup, or Stop in AURA's notification.
 - **Planned:** encrypting the Room database.
 
 Permissions used: Accessibility service, microphone, overlay (floating bubble), notifications, foreground service, start on boot, biometric, internet, and install packages (for self-update).

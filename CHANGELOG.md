@@ -7,6 +7,14 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Fixed — wrong taps and rough mic
+- Tapping a name no longer hits the search box that shows the same text: taps and checks skip text boxes and prefer exact, tappable matches
+- A tap that doesn't change the screen now fails (and recovers) instead of carrying on on the wrong screen
+- Typing goes only into the named field (view id or label); if it isn't on screen nothing is typed (was: whatever box had focus, e.g. the search bar)
+- WhatsApp skills confirm the chat is open before typing; "message sent" checks ignore text still in the input box
+- Mic: on-device recognizer for the wake word when available; system beeps hidden on restarts; no listening during tasks; no gap after "Hey AURA"; live text while speaking; one retry if nothing heard
+- "Voice narration" setting now works (off by default) — steps aren't read aloud unless enabled
+
 ### Added — reliability
 - Mid-task recovery: a failed step makes the LLM plan only the remaining steps from the current screen (max 2), instead of failing
 - `verify` step: "Done" means the right app/text is actually on screen; only verified paths are saved as skills

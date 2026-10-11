@@ -82,7 +82,9 @@ class ActionExecutor @Inject constructor(
             when (step.action) {
                 ActionStep.OPEN_APP     -> openApp(step.pkg, step.text)
                 ActionStep.TAP          -> tap(step.text, step.viewId)
-                ActionStep.TYPE         -> typeText(step.inputText ?: step.text)
+                // type: input_text = what to type; viewId / text = which field (its id or label)
+                ActionStep.TYPE         -> if (step.inputText != null) typeText(step.inputText, step.text, step.viewId)
+                                           else typeText(step.text, null, step.viewId)
                 ActionStep.SWIPE        -> swipe(step.direction ?: "up")
                 ActionStep.SCROLL       -> scroll(step.direction ?: "down", step.text)
                 ActionStep.BACK         -> global(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -156,36 +158,49 @@ class ActionExecutor @Inject constructor(
     }
 
     /**
-     * Tap the first node matching [text] or [viewId], walking up to a clickable
-     * ancestor if needed. Retries while the screen loads.
+     * Tap the best match for [text] or [viewId] (never a text box when matching by
+     * text — see [NodeFinder.Purpose.TAP]), walking up to a clickable ancestor if needed.
+     * Retries while the screen loads, and FAILS if the screen doesn't react to the tap,
+     * so later steps never run on the wrong screen.
      */
     suspend fun tap(text: String?, viewId: String?): StepResult {
         if (text.isNullOrBlank() && viewId.isNullOrBlank()) return StepResult.fail("Tap step had no target.")
-        val node = waitForNode(text, viewId)
+        val node = waitForNode(text, viewId, NodeFinder.Purpose.TAP)
             ?: return StepResult.fail("I couldn't find \"${text ?: viewId}\" on the screen.")
+        val before = uiObserver.changeCount
         val clickable = nodeFinder.findClickableAncestorOrSelf(node)
         val clicked = clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
         if (!clicked) {
             // Fall back to a real tap gesture at the node's position.
             val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
-            if (!bounds.isEmpty && tapAt(bounds.exactCenterX(), bounds.exactCenterY())) {
-                return StepResult.OK
+            if (bounds.isEmpty || !tapAt(bounds.exactCenterX(), bounds.exactCenterY())) {
+                return StepResult.fail("I found \"${text ?: viewId}\" but couldn't tap it.")
             }
-            return StepResult.fail("I found \"${text ?: viewId}\" but couldn't tap it.")
+        }
+        if (!uiObserver.waitForChange(before, TAP_EFFECT_TIMEOUT_MS)) {
+            return StepResult.fail("Tapping \"${text ?: viewId}\" didn't change anything on the screen.")
         }
         return StepResult.OK
     }
 
     /**
-     * Type into the focused input field, or the first editable field on screen.
+     * Type [text] into a specific field: the one with [fieldViewId], else the one whose
+     * label/hint matches [fieldLabel]. If a field was named and isn't on screen, the step
+     * FAILS — it never types into some other box (e.g. a search bar). With no field named,
+     * the focused field (or the only/first field) is used.
      */
-    suspend fun typeText(text: String?): StepResult {
+    suspend fun typeText(text: String?, fieldLabel: String?, fieldViewId: String?): StepResult {
         if (text.isNullOrEmpty()) return StepResult.fail("Type step had no text.")
+        val named = !fieldViewId.isNullOrBlank() || !fieldLabel.isNullOrBlank()
         val deadline = System.currentTimeMillis() + FIND_TIMEOUT_MS
         while (true) {
             val root = service?.rootInActiveWindow ?: return noService()
-            val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
-                ?: findFirstEditable(root)
+            val target = if (named) {
+                nodeFinder.findInput(root, fieldLabel, fieldViewId)
+            } else {
+                root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+                    ?: findFirstEditable(root)
+            }
             if (target != null) {
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -196,7 +211,10 @@ class ActionExecutor @Inject constructor(
                 return if (ok) StepResult.OK else StepResult.fail("I couldn't type into the text box.")
             }
             if (System.currentTimeMillis() > deadline) {
-                return StepResult.fail("There's no text box on the screen to type into.")
+                return StepResult.fail(
+                    if (named) "The \"${fieldLabel ?: fieldViewId}\" box isn't on the screen, so I didn't type."
+                    else "There's no text box on the screen to type into."
+                )
             }
             delay(FIND_POLL_MS)
         }
@@ -255,7 +273,7 @@ class ActionExecutor @Inject constructor(
 
     /** Check that an element is on screen (waits while the screen loads). */
     suspend fun findElement(text: String?, viewId: String?): StepResult {
-        val node = waitForNode(text, viewId)
+        val node = waitForNode(text, viewId, NodeFinder.Purpose.FIND)
             ?: return StepResult.fail("I couldn't find \"${text ?: viewId}\" on the screen.")
         node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
         return StepResult.OK
@@ -274,12 +292,16 @@ class ActionExecutor @Inject constructor(
     // ──────────────────────────────────────────────────────────────
 
     /** Poll the active window for a node until it appears or the timeout passes. */
-    private suspend fun waitForNode(text: String?, viewId: String?): AccessibilityNodeInfo? {
+    private suspend fun waitForNode(
+        text: String?,
+        viewId: String?,
+        purpose: NodeFinder.Purpose
+    ): AccessibilityNodeInfo? {
         val deadline = System.currentTimeMillis() + FIND_TIMEOUT_MS
         while (true) {
             val root = service?.rootInActiveWindow
             if (root != null) {
-                nodeFinder.findNode(root, text, viewId)?.let { return it }
+                nodeFinder.findBest(root, text, viewId, purpose)?.let { return it }
             }
             if (System.currentTimeMillis() > deadline) return null
             delay(FIND_POLL_MS)
@@ -328,7 +350,9 @@ class ActionExecutor @Inject constructor(
             foreground = root.packageName?.toString()
             val pkgOk = pkg.isNullOrBlank() || foreground == pkg ||
                 (lastLaunch.first == pkg && foreground == lastLaunch.second)
-            val textOk = text.isNullOrBlank() || nodeFinder.findNode(root, text, null) != null
+            // Text in an input box doesn't count (a typed-but-unsent message isn't proof).
+            val textOk = text.isNullOrBlank() ||
+                nodeFinder.findBest(root, text, null, NodeFinder.Purpose.VERIFY) != null
             if (pkgOk && textOk) return StepResult.OK
             if (System.currentTimeMillis() > deadline) break
             delay(FIND_POLL_MS)
@@ -406,6 +430,8 @@ class ActionExecutor @Inject constructor(
             ActionStep.DIAL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.OPEN_LINK
         )
         const val VERIFY_TIMEOUT_MS = 5000L
+        /** How long a tap may take before the screen visibly reacts. */
+        const val TAP_EFFECT_TIMEOUT_MS = 2500L
         /** Steps that don't change the screen, so there's nothing to wait for afterwards. */
         val NO_SETTLE = setOf(
             ActionStep.WAIT, ActionStep.CONFIRM_SEND, ActionStep.VERIFY, ActionStep.READ_TEXT,

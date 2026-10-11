@@ -40,7 +40,8 @@ private const val TAG = "VoiceManager"
  */
 @Singleton
 class VoiceManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val apiKeyStore: com.aura.llm.ApiKeyStore
 ) {
     // ──────────────────────────────────────────────────────────────
     // TTS
@@ -104,6 +105,10 @@ class VoiceManager @Inject constructor(
      * Called by TaskManager at each step.
      */
     fun narrateStep(step: ActionStep) {
+        // Off by default (Settings → Voice narration): reading every step aloud is noisy,
+        // and the popup already shows progress. Confirmations and results are always spoken.
+        if (!apiKeyStore.settings().getBoolean(PREF_NARRATION, false)) return
+        if (step.action == ActionStep.WAIT || step.action == ActionStep.VERIFY) return
         val narration = when (step.action) {
             ActionStep.OPEN_APP   -> "Opening ${step.pkg?.split(".")?.lastOrNull() ?: "app"}"
             ActionStep.FIND_ELEMENT -> "Looking for ${step.text ?: "element"}"
@@ -158,7 +163,7 @@ class VoiceManager @Inject constructor(
      *
      * Uses Android SpeechRecognizer. Call from the main thread.
      */
-    suspend fun recognizeSpeech(): String? = suspendCancellableCoroutine { cont ->
+    suspend fun recognizeSpeech(onPartial: ((String) -> Unit)? = null): String? = suspendCancellableCoroutine { cont ->
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Log.w(TAG, "SpeechRecognizer not available")
             cont.resume(null)
@@ -198,7 +203,11 @@ class VoiceManager @Inject constructor(
 
             override fun onBeginningOfSpeech() { Log.d(TAG, "Speech started") }
             override fun onEndOfSpeech() { Log.d(TAG, "Speech ended") }
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()?.takeIf { it.isNotBlank() } ?: return
+                onPartial?.invoke(text)
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
@@ -208,7 +217,10 @@ class VoiceManager @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoicePrefs.commandLanguageTag(context))
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            // Live text for the popup, and don't cut the user off on a short pause.
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, onPartial != null)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
         recognizer.startListening(intent)
@@ -260,6 +272,8 @@ class VoiceManager @Inject constructor(
     }
 
     companion object {
+        /** Same key SettingsViewModel writes for the "Voice narration" switch. */
+        const val PREF_NARRATION = "voice_narration"
         private val CONFIRM_WORDS = setOf("confirm", "yes", "allow", "proceed", "ok", "okay", "sure", "go")
         private val CANCEL_WORDS  = setOf("cancel", "no", "deny", "stop", "abort", "don't")
     }
