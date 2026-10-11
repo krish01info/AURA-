@@ -1,7 +1,8 @@
 # GitHub Copilot Instructions for AURA
 
-Read `AGENTS.md` at the project root first. It is the index of the codebase:
-module map, task data flow, conventions, and which docs to read when.
+Read `CLAUDE.md` (status, workflow, pitfalls) and `AGENTS.md` at the project root first.
+`AGENTS.md` is the index of the codebase: module map, task data flow, conventions,
+and which docs to read when.
 
 For per-class detail, read the `package.md` in the package you are changing
 (`android/app/src/main/java/com/aura/<package>/package.md`).

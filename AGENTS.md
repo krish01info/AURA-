@@ -2,6 +2,9 @@
 
 > Read this first. It is the **index** of the codebase: enough to find the right
 > file without opening the others. Keep it short — every AI session loads it.
+>
+> **Current status, next steps, build/ship workflow and known pitfalls: [CLAUDE.md](CLAUDE.md)**
+> (any AI tool should read it too, not just Claude).
 
 ## 1. Project at a glance
 
