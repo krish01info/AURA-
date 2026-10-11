@@ -109,6 +109,8 @@ class UIObserver @Inject constructor() {
         val lines = LinkedHashSet<String>()
         collect(root, 0, lines)
         val sb = StringBuilder()
+        // Say which app this is — the planner can't always tell from the labels alone.
+        root.packageName?.toString()?.let { pkg -> sb.append("[app] ").append(appLabel(pkg)).append(" (").append(pkg).append(")\n") }
         for (line in lines) {
             if (sb.length + line.length + 1 > MAX_CHARS) break
             sb.append(line).append('\n')
@@ -131,9 +133,11 @@ class UIObserver @Inject constructor() {
         val text = node.text?.toString()?.trim()?.replace('\n', ' ')
         val desc = node.contentDescription?.toString()?.trim()?.replace('\n', ' ')
         val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.hintText?.toString()?.trim() else null
+        // Long descriptions are kept (shortened): apps like YouTube label each result only that way
+        // ("<title> - 3 minutes - <channel> - play video"). Dropping them hid the results.
         val label = (text?.takeIf { it.isNotEmpty() }
-            ?: desc?.takeIf { it.isNotEmpty() && it.length <= 80 }
-            ?: hint?.takeIf { it.isNotEmpty() })?.take(120)
+            ?: desc?.takeIf { it.isNotEmpty() }
+            ?: hint?.takeIf { it.isNotEmpty() })?.let { if (it.length > 120) it.take(117) + "…" else it }
         val id = node.viewIdResourceName
 
         val role = when {
@@ -151,8 +155,15 @@ class UIObserver @Inject constructor() {
         }
     }
 
+    private val labelCache = HashMap<String, String>()
+
+    private fun appLabel(pkg: String): String = labelCache.getOrPut(pkg) {
+        val pm = service?.packageManager ?: return@getOrPut pkg
+        try { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
+    }
+
     private companion object {
-        const val MAX_CHARS = 2000
+        const val MAX_CHARS = 2500
         const val MAX_LINES = 150
         const val MAX_DEPTH = 30
     }

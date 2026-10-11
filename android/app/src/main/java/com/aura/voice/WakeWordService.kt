@@ -30,6 +30,7 @@ import com.aura.agent.TaskManager
 import com.aura.agent.TaskState
 import com.aura.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,6 +77,10 @@ class WakeWordService : Service() {
     @Inject lateinit var voiceManager: VoiceManager
     @Inject lateinit var taskManager: TaskManager
     @Inject lateinit var overlay: AssistantOverlay
+    @Inject lateinit var keywordSpotter: KeywordSpotter
+
+    /** Offline "Hey AURA" listener (Vosk) — used instead of the SpeechRecognizer loop when possible. */
+    private var offlineWakeJob: Job? = null
 
     private enum class Mode { IDLE, WAKE, COMMAND, TASK }
 
@@ -131,6 +136,7 @@ class WakeWordService : Service() {
             return
         }
         started = true
+        running = this
         wakeEnabled = isWakeEnabled(this)
         tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 60) } catch (_: Exception) { null }
         audioManager = getSystemService(AudioManager::class.java)
@@ -161,16 +167,7 @@ class WakeWordService : Service() {
         when (intent?.action) {
             ACTION_LISTEN_NOW -> startCommandCapture()
             ACTION_STOP_TASK -> taskManager.emergencyStop()
-            ACTION_KEEP_ALIVE -> {
-                // A live task needs this mic service running and its banner on screen
-                // (the visible overlay is what lets AURA share the mic with the app).
-                if (mode == Mode.IDLE || mode == Mode.WAKE) {
-                    destroyWakeRecognizer()
-                    mode = Mode.TASK
-                    lastHandledState = null
-                    onTaskState(taskManager.state.value)
-                }
-            }
+            ACTION_KEEP_ALIVE -> onKeepAlive()
             ACTION_TURN_OFF -> {
                 setWakeEnabled(this, false)
                 wakeEnabled = false
@@ -192,6 +189,7 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        if (running === this) running = null
         mode = Mode.IDLE
         flowJob?.cancel()
         hideJob?.cancel()
@@ -205,6 +203,19 @@ class WakeWordService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * A live task needs this mic service running and its banner on screen
+     * (the visible overlay is what lets AURA share the mic with the app in front).
+     */
+    private fun onKeepAlive() {
+        if (mode == Mode.IDLE || mode == Mode.WAKE) {
+            destroyWakeRecognizer()
+            mode = Mode.TASK
+            lastHandledState = null
+            onTaskState(taskManager.state.value)
+        }
+    }
 
     // ──────────────────────────────────────────────────────────────
     // Wake-word listening
@@ -229,6 +240,7 @@ class WakeWordService : Service() {
             updateNotification("No speech recognition on this phone — install or enable the Google app")
             return
         }
+        if (startOfflineWake()) return
         wakeHeardInPartial = false
         val recognizer = wakeRecognizer ?: createWakeRecognizer().also {
             it.setRecognitionListener(wakeListener)
@@ -281,7 +293,71 @@ class WakeWordService : Service() {
         return (RESTART_MS shl fastFailStreak.coerceAtMost(5)).coerceAtMost(MAX_QUIET_BACKOFF_MS)
     }
 
+    /**
+     * Listen for "Hey AURA" with the offline model in AURA's own process: one continuous
+     * session (no mic flicker, no beeps) that keeps working while other apps are in front.
+     * Only when the voice model is downloaded and knows the word "aura"; else the
+     * SpeechRecognizer loop is used. Returns true if it took over.
+     */
+    private fun startOfflineWake(): Boolean {
+        if (offlineWakeJob?.isActive == true) return true
+        if (keywordSpotter.modelState.value !is KeywordSpotter.ModelState.Ready) return false
+        if (!offlineWakeUsable) return false
+        if (!keywordSpotter.knowsWord("aura")) {
+            Log.w(TAG, "Offline model doesn't know \"aura\" — using the SpeechRecognizer wake loop")
+            offlineWakeUsable = false
+            return false
+        }
+        Log.i(TAG, "Wake word: offline (Vosk)")
+        val job = scope.launch {
+            var woke = false
+            keywordSpotter.listen(OFFLINE_WAKE_PHRASES).collect { heard ->
+                when (heard) {
+                    is KeywordSpotter.Heard.Text -> if (!woke && listeningForWake() &&
+                        heard.text.split(' ').contains("aura")
+                    ) {
+                        woke = true
+                        offlineWakePending = true
+                        Log.i(TAG, "Offline wake: \"${heard.text}\"")
+                        throw CancellationException("woke") // stop listening: frees the mic for the command
+                    }
+                    is KeywordSpotter.Heard.Error -> {
+                        Log.w(TAG, "Offline wake failed (${heard.reason}) — using the SpeechRecognizer loop")
+                        offlineWakeUsable = false
+                        throw CancellationException("failed")
+                    }
+                    is KeywordSpotter.Heard.Silenced -> { /* another app holds the mic for now */ }
+                }
+            }
+        }
+        offlineWakeJob = job
+        job.invokeOnCompletion {
+            scope.launch {
+                if (offlineWakeJob === job) offlineWakeJob = null
+                if (offlineWakeTriggered()) {
+                    beep()
+                    startCommandCapture(alreadyBeeped = true)
+                } else if (!offlineWakeUsable && (mode == Mode.WAKE || mode == Mode.TASK)) {
+                    scheduleWake(RESTART_MS)
+                }
+            }
+        }
+        return true
+    }
+
+    /** Set by the offline listener just before it stops because it heard the wake word. */
+    private var offlineWakePending = false
+    private var offlineWakeUsable = true
+
+    private fun offlineWakeTriggered(): Boolean {
+        val pending = offlineWakePending
+        offlineWakePending = false
+        return pending
+    }
+
     private fun destroyWakeRecognizer() {
+        offlineWakeJob?.cancel()
+        offlineWakeJob = null
         restartJob?.cancel()
         try {
             wakeRecognizer?.cancel()
@@ -775,6 +851,8 @@ class WakeWordService : Service() {
         private val ON_DEVICE_UNSUPPORTED_ERRORS = setOf(12, 13)
         /** How long the heard command is shown (with Cancel) before it runs. */
         private const val CONFIRM_HEARD_MS = 1300L
+        /** Grammar for the offline wake listener ("[unk]" absorbs everything else). */
+        private val OFFLINE_WAKE_PHRASES = listOf("hey aura", "hi aura", "ok aura", "okay aura", "aura")
         /** How long "Done" (with its Wrong button) stays up. */
         private const val DONE_SHOW_MS = 6000L
 
@@ -814,6 +892,17 @@ class WakeWordService : Service() {
                 .putBoolean(PREF_WAKE_ENABLED, enabled).apply()
         }
 
+        /**
+         * The running service, if any. The floating mic and other in-app callers talk to it
+         * directly: asking Android to start a microphone service again from another app is
+         * refused (Android 12+/14), which made the on-screen mic do nothing.
+         */
+        @Volatile private var running: WakeWordService? = null
+        private val mainHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+
+        /** True while the assistant service is up (mic available in other apps). */
+        val isRunning: Boolean get() = running != null
+
         fun listenNowIntent(context: Context) =
             Intent(context, WakeWordService::class.java).setAction(ACTION_LISTEN_NOW)
 
@@ -823,12 +912,27 @@ class WakeWordService : Service() {
             return start(context, Intent(context, WakeWordService::class.java).setAction(ACTION_START_WAKE))
         }
 
-        /** Listen for one command now (mic button / bubble). Call while AURA is in the foreground. */
-        fun listenNow(context: Context): Boolean = start(context, listenNowIntent(context))
+        /**
+         * Listen for one command now (mic button / floating bubble). Uses the running service
+         * directly when it's up — works from any app. Otherwise starts it, which Android only
+         * allows while AURA is open.
+         */
+        fun listenNow(context: Context): Boolean {
+            running?.let { svc ->
+                mainHandler.post { svc.startCommandCapture() }
+                return true
+            }
+            return start(context, listenNowIntent(context))
+        }
 
         /** Keep the mic service (and its popup) up for a live task. */
-        fun keepRunningForLive(context: Context): Boolean =
-            start(context, Intent(context, WakeWordService::class.java).setAction(ACTION_KEEP_ALIVE))
+        fun keepRunningForLive(context: Context): Boolean {
+            running?.let { svc ->
+                mainHandler.post { svc.onKeepAlive() }
+                return true
+            }
+            return start(context, Intent(context, WakeWordService::class.java).setAction(ACTION_KEEP_ALIVE))
+        }
 
         /** Turn off always-listening. */
         fun turnOff(context: Context) {
