@@ -1,5 +1,5 @@
 {
- "version": 2,
+ "version": 3,
  "note": "AURA app shortcuts. Each entry becomes a built-in skill (no LLM, no screen tapping where possible). Edit and bump 'version'; phones fetch this file daily from GitHub. Step keys: see data/model/ActionStep.kt.",
  "skills": [
   {
@@ -1279,6 +1279,394 @@
     {
      "action": "open_link",
      "uri": "upi://pay?pa={upi_id}&pn={upi_id}&am={amount}&cu=INR"
+    }
+   ]
+  },
+  {
+   "app": "android.media.action.VIDEO_CAMERA",
+   "category": "camera",
+   "action": "live_video_photo",
+   "name": "Camera: video + photos by voice",
+   "risk": "LOW",
+   "description": "Opens the video camera; 'start' records, 'capture' takes a photo, 'stop' ends",
+   "patterns": [
+    "record a video and take photos when i say capture",
+    "record when i say start and take a photo when i say capture",
+    "start recording when i say start",
+    "hands free video",
+    "voice video camera",
+    "record video with my voice"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.VIDEO_CAMERA"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "start"
+       ],
+       "once": true,
+       "then": [
+        {
+         "action": "tap",
+         "text": "Record|Start recording|Record video|Shutter|Start"
+        }
+       ]
+      },
+      {
+       "words": [
+        "capture"
+       ],
+       "then": [
+        {
+         "action": "tap",
+         "text": "Capture|Take photo|Take picture|Snapshot|Capture image"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ],
+     "on_stop": [
+      {
+       "action": "tap",
+       "text": "Stop|Stop recording|Shutter"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "app": "android.media.action.STILL_IMAGE_CAMERA",
+   "category": "camera",
+   "action": "live_photo_word",
+   "name": "Camera: photo on a word",
+   "risk": "LOW",
+   "description": "Opens the camera and takes a photo each time you say your word",
+   "patterns": [
+    "take a photo when i say {photo_word}",
+    "take a picture when i say {photo_word}",
+    "click a photo when i say {photo_word}",
+    "take a selfie when i say {photo_word}",
+    "take photos when i say {photo_word}",
+    "take a photo whenever i say {photo_word}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.STILL_IMAGE_CAMERA"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "{photo_word}"
+       ],
+       "then": [
+        {
+         "action": "tap",
+         "text": "Shutter|Capture|Take photo|Take picture|Camera shutter|Capture image"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "android.media.action.STILL_IMAGE_CAMERA",
+   "category": "camera",
+   "action": "live_photo_capture",
+   "name": "Camera: voice shutter",
+   "risk": "LOW",
+   "description": "Opens the camera; say 'capture' for a photo, 'stop' to finish",
+   "patterns": [
+    "voice camera",
+    "hands free camera",
+    "voice shutter",
+    "camera voice control"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.media.action.STILL_IMAGE_CAMERA"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "capture"
+       ],
+       "then": [
+        {
+         "action": "tap",
+         "text": "Shutter|Capture|Take photo|Take picture|Camera shutter|Capture image"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "reading",
+   "action": "live_scroll_word",
+   "name": "Scroll on a word",
+   "risk": "LOW",
+   "description": "Scrolls the current app each time you say your word",
+   "patterns": [
+    "scroll down when i say {next_word}",
+    "scroll when i say {next_word}",
+    "scroll the page when i say {next_word}"
+   ],
+   "steps": [
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "{next_word}"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "scroll",
+         "direction": "down"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "reading",
+   "action": "live_scroll",
+   "name": "Hands-free scrolling",
+   "risk": "LOW",
+   "description": "'next' scrolls down, 'back' scrolls up, 'stop' ends",
+   "patterns": [
+    "hands free scrolling",
+    "scroll with my voice",
+    "voice scrolling",
+    "hands free reading"
+   ],
+   "steps": [
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "next"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "scroll",
+         "direction": "down"
+        }
+       ]
+      },
+      {
+       "words": [
+        "back"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "scroll",
+         "direction": "up"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "video",
+   "action": "live_skip_word",
+   "name": "Skip reels on a word",
+   "risk": "LOW",
+   "description": "Swipes to the next reel / short each time you say your word",
+   "patterns": [
+    "skip reels when i say {skip_word}",
+    "next reel when i say {skip_word}",
+    "skip shorts when i say {skip_word}",
+    "swipe up when i say {skip_word}",
+    "skip videos when i say {skip_word}"
+   ],
+   "steps": [
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "{skip_word}"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "swipe",
+         "direction": "up"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "video",
+   "action": "live_skip",
+   "name": "Hands-free reels",
+   "risk": "LOW",
+   "description": "'next' swipes to the next reel, 'back' to the previous, 'stop' ends",
+   "patterns": [
+    "hands free reels",
+    "hands free shorts",
+    "skip reels with my voice",
+    "voice control reels"
+   ],
+   "steps": [
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "next"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "swipe",
+         "direction": "up"
+        }
+       ]
+      },
+      {
+       "words": [
+        "back"
+       ],
+       "cooldown_ms": 600,
+       "then": [
+        {
+         "action": "swipe",
+         "direction": "down"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop"
+     ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "music",
+   "action": "live_media",
+   "name": "Hands-free music",
+   "risk": "LOW",
+   "description": "'next', 'previous', 'pause', 'play' control what's playing; 'stop listening' ends",
+   "patterns": [
+    "control music with my voice",
+    "hands free music",
+    "music voice control",
+    "voice control music"
+   ],
+   "steps": [
+    {
+     "action": "listen",
+     "triggers": [
+      {
+       "words": [
+        "next"
+       ],
+       "then": [
+        {
+         "action": "media",
+         "text": "next"
+        }
+       ]
+      },
+      {
+       "words": [
+        "previous"
+       ],
+       "then": [
+        {
+         "action": "media",
+         "text": "previous"
+        }
+       ]
+      },
+      {
+       "words": [
+        "pause"
+       ],
+       "then": [
+        {
+         "action": "media",
+         "text": "pause"
+        }
+       ]
+      },
+      {
+       "words": [
+        "play"
+       ],
+       "then": [
+        {
+         "action": "media",
+         "text": "play"
+        }
+       ]
+      }
+     ],
+     "stop_words": [
+      "stop listening",
+      "stop"
+     ]
     }
    ]
   }
