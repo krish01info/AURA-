@@ -7,6 +7,17 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-10-11
+
+First signed release. From now on AURA updates itself from GitHub Releases (Settings shows the update),
+keeping your skills and settings. **Uninstall the old AURA once before installing this version** —
+older builds were signed with a different, temporary key.
+
+### Changed — smaller, signed release builds
+- Release APK is shrunk (about 24 MB, was 107 MB) and signed with one permanent key
+- Only ARM native code is included (phones), not the x86 emulator copies
+- First-time setup offers the offline voice model download (36 MB, optional)
+
 ### Added — live tasks (keep listening inside any app)
 - Say "voice camera", "take a photo when I say cheese", "record a video and take photos when I say capture",
   "hands free scrolling", "hands free reels" or "hands free music": AURA keeps listening offline and acts on each word

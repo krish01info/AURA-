@@ -21,3 +21,8 @@
 # Keep line numbers so crash reports from release builds are readable.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Encrypted settings (security-crypto → Tink) read protobuf fields by reflection.
+-keepclassmembers class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite {
+    <fields>;
+}
