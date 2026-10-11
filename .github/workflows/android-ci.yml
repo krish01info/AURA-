@@ -32,7 +32,26 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      # Re-post compiler / Gradle errors as annotations so they show on the PR
+      # (and can be read via the API) without opening the full log.
+      - name: Report build errors
+        if: failure()
+        working-directory: android
+        shell: bash
+        run: |
+          if [ -f build.log ]; then
+            # GitHub keeps max 10 error annotations per step: pack 6 lines into each.
+            grep -E '^e: |What went wrong|Execution failed|^> |error:|Exception|Could not|not found|Unresolved' build.log \
+              | grep -v '^[[:space:]]*at ' | awk '!seen[$0]++' | head -54 \
+              | cut -c1-400 | sed 's/%/%25/g' \
+              | awk '{ buf = (NR % 6 == 1) ? $0 : buf "%0A" $0 } NR % 6 == 0 { print buf; buf="" } END { if (buf != "") print buf }' \
+              | while IFS= read -r chunk; do echo "::error title=Build error::${chunk}"; done
+          fi
 
       - name: Run unit tests
         working-directory: android
