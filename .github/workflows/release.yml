@@ -1,16 +1,17 @@
 name: Release APK
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HOW TO RELEASE — just 4 commands:
+# HOW TO RELEASE
 #
 #   1. Bump versionCode + versionName in android/app/build.gradle.kts
-#   2. git add -A
-#   3. git commit -m "release: v0.2.0"
-#   4. git tag v0.2.0
-#   5. git push && git push --tags
+#   2. Add a "## [vX.Y.Z] - date" section to CHANGELOG.md (becomes the release notes)
+#   3. Merge to main, then push the tag:  git tag vX.Y.Z && git push origin vX.Y.Z
+#      (or Actions → Release APK → Run workflow and type the tag)
 #
-#   GitHub builds the APK automatically and publishes it as a Release.
-#   No keystore needed. Optional repo secrets GROQ_API_KEY / GEMINI_API_KEY are baked into the APK.
+#   GitHub builds a shrunk RELEASE APK signed with the permanent AURA key and publishes it.
+#   Phones see it through the in-app update check and install it over the old version.
+#   Required secrets: AURA_KEYSTORE_BASE64, AURA_KEYSTORE_PASSWORD.
+#   Optional: GROQ_API_KEY, GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY (baked into the APK).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -47,16 +48,35 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           # Keys come from repo secrets (Settings > Secrets and variables > Actions).
           # Empty if unset — the app then needs a key typed into its Settings screen.
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
           echo "GROQ_API_KEY=$GROQ_API_KEY" >> android/local.properties
           echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> android/local.properties
+          echo "SUPABASE_URL=$SUPABASE_URL" >> android/local.properties
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> android/local.properties
 
-      - name: Build debug APK
+      # A release must be signed with the permanent key, or phones can't install it as an update.
+      - name: Signing key
+        env:
+          AURA_KEYSTORE_BASE64: ${{ secrets.AURA_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          if [ -z "$AURA_KEYSTORE_BASE64" ]; then
+            echo "::error title=No signing key::Add the AURA_KEYSTORE_BASE64 and AURA_KEYSTORE_PASSWORD repo secrets first"
+            exit 1
+          fi
+          echo "$AURA_KEYSTORE_BASE64" | base64 -d > android/aura-release.jks
+          echo "AURA_KEYSTORE_FILE=aura-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        env:
+          AURA_KEYSTORE_PASSWORD: ${{ secrets.AURA_KEYSTORE_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
         run: |
@@ -64,9 +84,9 @@ jobs:
           if [ "$VERSION" = "main" ] || [ -z "$VERSION" ]; then
             VERSION="${{ github.event.inputs.version }}"
           fi
-          cp android/app/build/outputs/apk/debug/app-debug.apk \
-             android/app/build/outputs/apk/debug/aura-${VERSION}.apk
-          echo "APK=android/app/build/outputs/apk/debug/aura-${VERSION}.apk" >> $GITHUB_ENV
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             android/app/build/outputs/apk/release/aura-${VERSION}.apk
+          echo "APK=android/app/build/outputs/apk/release/aura-${VERSION}.apk" >> $GITHUB_ENV
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Get release notes from CHANGELOG

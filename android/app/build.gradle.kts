@@ -17,6 +17,13 @@ val localProperties = Properties().apply {
     }
 }
 
+// Permanent signing key (one key for every build, so updates install over each other).
+// CI decodes the AURA_KEYSTORE_BASE64 secret into a file; locally, set these in local.properties.
+// Without them, Android Studio's per-machine debug key is used (fine for local tests only).
+fun signingProp(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+val auraKeystore = signingProp("AURA_KEYSTORE_FILE")?.let { rootProject.file(it) }?.takeIf { it.exists() }
+
 android {
     namespace = "com.aura"
     compileSdk = 35
@@ -25,8 +32,13 @@ android {
         applicationId = "com.aura.agent"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+
+        // Phones are ARM; x86 copies of native code (Vosk/JNA) are only for emulators.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -40,14 +52,28 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseKey\"")
     }
 
+    signingConfigs {
+        if (auraKeystore != null) {
+            create("aura") {
+                storeFile = auraKeystore
+                storePassword = signingProp("AURA_KEYSTORE_PASSWORD")
+                keyAlias = signingProp("AURA_KEY_ALIAS") ?: "aura"
+                keyPassword = signingProp("AURA_KEY_PASSWORD") ?: signingProp("AURA_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("aura")
         }
         debug {
             isMinifyEnabled = false
+            // Same key as releases when available, so a debug build can be updated by a release.
+            signingConfigs.findByName("aura")?.let { signingConfig = it }
         }
     }
 

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.aura.voice.KeywordSpotter
 import javax.inject.Inject
 
 private const val TAG = "HomeViewModel"
@@ -42,8 +43,27 @@ class HomeViewModel @Inject constructor(
     private val taskManager: TaskManager,
     private val voiceManager: VoiceManager,
     private val biometricGate: BiometricGate,
-    private val floatingBubble: FloatingBubble
+    private val floatingBubble: FloatingBubble,
+    private val keywordSpotter: KeywordSpotter
 ) : ViewModel() {
+
+    // ── Offline voice model (live tasks), offered during first-time setup ──
+    val voiceModelState: StateFlow<KeywordSpotter.ModelState> = keywordSpotter.modelState
+
+    private val setupPrefs = context.getSharedPreferences("aura_setup", Context.MODE_PRIVATE)
+    private val _voiceModelOfferDismissed = MutableStateFlow(setupPrefs.getBoolean(PREF_MODEL_OFFER_DISMISSED, false))
+    val voiceModelOfferDismissed: StateFlow<Boolean> = _voiceModelOfferDismissed
+
+    /** Download the ~36 MB offline voice model now, so the first live task starts at once. */
+    fun downloadVoiceModel() {
+        viewModelScope.launch { keywordSpotter.ensureModel() }
+    }
+
+    /** "Not now": hide the offer; the model still downloads on the first live task. */
+    fun dismissVoiceModelOffer() {
+        setupPrefs.edit().putBoolean(PREF_MODEL_OFFER_DISMISSED, true).apply()
+        _voiceModelOfferDismissed.value = true
+    }
 
     val taskState: StateFlow<TaskState> = taskManager.state.stateIn(
         scope = viewModelScope,
@@ -232,5 +252,9 @@ class HomeViewModel @Inject constructor(
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
         return enabled.contains(expected)
+    }
+
+    private companion object {
+        const val PREF_MODEL_OFFER_DISMISSED = "voice_model_offer_dismissed"
     }
 }
