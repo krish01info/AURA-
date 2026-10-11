@@ -5,6 +5,8 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  # Adds a "Run workflow" button on the Actions tab (e.g. after changing repo secrets)
+  workflow_dispatch:
 
 jobs:
   build:
