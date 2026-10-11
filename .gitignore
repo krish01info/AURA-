@@ -1,0 +1,25 @@
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Build output / compiler scratch ──────────────────────────────────────────
+build/
+.gradle/
+.kotlin/
+captures/
+
+# ── Secrets — never commit ───────────────────────────────────────────────────
+local.properties
+google-services.json
+*.keystore
+*.jks
+.env
+.env.*
+!.env.example
+
+# ── Claude Code local overrides (shared settings.json stays tracked) ─────────
+.claude/settings.local.json

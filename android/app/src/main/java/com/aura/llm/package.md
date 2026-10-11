@@ -1,4 +1,4 @@
-﻿# llm/ package
+# llm/ package
 
 Two LLM clients — same interface, different providers.
 

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./docs/research/**)",
+      "Read(./android/app/schemas/**)",
+      "Read(./**/build/**)",
+      "Read(./**/.gradle/**)"
+    ]
+  }
+}

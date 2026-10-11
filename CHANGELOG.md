@@ -5,6 +5,21 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ---
 
+## [Unreleased]
+
+### Changed
+- Repo layout: design, plan and research docs moved into `docs/`; AGENTS.md slimmed to an index with per-package `package.md` files
+- README corrected to match the code (no Python backend; real LLM models, actions, permissions; feature status column)
+
+### Added
+- `CLAUDE.md`, `.claude/settings.json` (keeps large research docs and build output out of AI context), root `.gitignore`, `docs/plans/roadmap.md`
+- `GEMINI_API_KEY` in `.env.example`
+
+### Fixed
+- Broken characters in README and AGENTS.md; IDE files and compiler logs no longer tracked
+
+---
+
 ## [v0.2.0] - 2026-09-30
 
 ### Added
