@@ -51,3 +51,4 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 - In patterns "on"/"in" are interchangeable and may be followed by "the"; app spellings are unified (playstore → play store, you tube → youtube).
 - Changing the entity → bump `AURADatabase` version with an auto-migration (needs the old
   schema JSON in `android/app/schemas/`), and update `docs/cloud/supabase_skill_packs.sql`.
+- Live tasks (`listen` steps) are skills too: `SkillMatcher.fill/templatize/slotsInSteps` recurse into `triggers[].words/then`, `stop_words` and `on_stop`, so a trigger word can be a slot ("take a photo when i say {photo_word}"). Built-in live shortcuts must keep every trigger step LOW/MEDIUM (`AppShortcutsTest`).

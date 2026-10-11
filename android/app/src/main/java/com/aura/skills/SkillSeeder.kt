@@ -125,7 +125,7 @@ class SkillSeeder @Inject constructor(
         require(normalized.isNotEmpty()) { "no usable patterns" }
         require(def.steps.isNotEmpty()) { "no steps" }
         // A newer shortcuts file may use actions this app version doesn't have yet.
-        val unknown = def.steps.map { it.action }.filter { it !in ActionStep.KNOWN_ACTIONS }
+        val unknown = def.steps.flatMap { it.flatten() }.map { it.action }.filter { it !in ActionStep.KNOWN_ACTIONS }
         require(unknown.isEmpty()) { "needs a newer AURA (unknown actions $unknown)" }
         return SkillPackEntity(
             skillId = SkillIdentity.variantId(intentId, null, OS_UNIVERSAL, null),

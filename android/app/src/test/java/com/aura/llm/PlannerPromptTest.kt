@@ -70,7 +70,7 @@ class PlannerPromptTest {
 
     @Test fun `system prompt documents every action the executor supports`() {
         listOf("open_app", "tap", "type", "scroll", "swipe", "wait", "back", "home", "find_element",
-            "read_text", "confirm_send", "verify", "clarify", "call", "dial", "sms", "alarm", "timer", "open_link",
+            "read_text", "confirm_send", "verify", "clarify", "call", "dial", "sms", "listen", "alarm", "timer", "open_link",
             "intent", "media", "now_playing", "reply", "read_notifications")
             .forEach { assertTrue("missing $it", PlannerPrompt.SYSTEM.contains("\"$it\"")) }
     }

@@ -16,6 +16,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -145,9 +147,30 @@ class WakeWordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!started) return START_NOT_STICKY
+        // Every startForegroundService() call must be answered with startForeground(),
+        // even when the service is already running.
+        try {
+            ServiceCompat.startForeground(
+                this, NOTIF_ID, buildNotification(notificationText),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground again failed: ${e.message}")
+        }
         when (intent?.action) {
             ACTION_LISTEN_NOW -> startCommandCapture()
             ACTION_STOP_TASK -> taskManager.emergencyStop()
+            ACTION_KEEP_ALIVE -> {
+                // A live task needs this mic service running and its banner on screen
+                // (the visible overlay is what lets AURA share the mic with the app).
+                if (mode == Mode.IDLE || mode == Mode.WAKE) {
+                    destroyWakeRecognizer()
+                    mode = Mode.TASK
+                    lastHandledState = null
+                    onTaskState(taskManager.state.value)
+                }
+            }
             ACTION_TURN_OFF -> {
                 setWakeEnabled(this, false)
                 wakeEnabled = false
@@ -189,6 +212,8 @@ class WakeWordService : Service() {
 
     private fun startWake() {
         restartJob?.cancel()
+        // A live task owns the mic (offline keyword spotter); no SpeechRecognizer meanwhile.
+        if (taskManager.state.value is TaskState.Live) return
         if (!wakeEnabled) {
             mode = Mode.IDLE
             return
@@ -449,6 +474,7 @@ class WakeWordService : Service() {
                 describe(state.currentStep.action, state.currentStep.text ?: state.currentStep.pkg),
                 onStop = { taskManager.emergencyStop() }
             )
+            is TaskState.Live -> showLive(state)
             is TaskState.WaitingForUnlock -> overlay.showWorking(
                 "Unlock ${state.appName ?: "the app"}",
                 "I'll continue as soon as it's open.",
@@ -530,6 +556,28 @@ class WakeWordService : Service() {
             onClose = { closePanel() }
         ))
         scheduleClose(showMs)
+    }
+
+    private var lastLiveFired = 0
+
+    /** Live task: small banner with the words; a tick on the phone each time one is acted on. */
+    private fun showLive(state: TaskState.Live) {
+        destroyWakeRecognizer()
+        if (state.fired > lastLiveFired) tick()
+        if (state.fired == 0) lastLiveFired = 0 else lastLiveFired = state.fired
+        val body = state.status
+            ?: state.lastHeard?.let { "\u2713 \u201C$it\u201D  (${state.fired})" }
+            ?: "Say a word \u2014 or \u201Cstop\u201D to finish."
+        overlay.showWorking("\u25CF Listening: ${state.words.joinToString(" \u00B7 ")}", body,
+            onStop = { taskManager.emergencyStop() })
+        updateNotification("Live: listening for ${state.words.joinToString(", ")}")
+    }
+
+    /** Haptic tick — no sound, so it isn't recorded into a video. */
+    private fun tick() {
+        try {
+            getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+        } catch (_: Exception) { }
     }
 
     /** "Wrong" after Done: forget the skill that did it, then ask what they wanted. */
@@ -706,7 +754,10 @@ class WakeWordService : Service() {
             .build()
     }
 
+    private var notificationText = "Say \"Hey AURA\" to activate"
+
     private fun updateNotification(text: String) {
+        notificationText = text
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(text))
     }
 
@@ -715,6 +766,7 @@ class WakeWordService : Service() {
         const val ACTION_LISTEN_NOW = "com.aura.assistant.LISTEN_NOW"
         const val ACTION_STOP_TASK  = "com.aura.assistant.STOP_TASK"
         const val ACTION_TURN_OFF   = "com.aura.assistant.TURN_OFF"
+        const val ACTION_KEEP_ALIVE = "com.aura.assistant.KEEP_ALIVE"
 
         private const val RESTART_MS = 250L
         /** How long system sounds stay muted around a recognizer start. */
@@ -773,6 +825,10 @@ class WakeWordService : Service() {
 
         /** Listen for one command now (mic button / bubble). Call while AURA is in the foreground. */
         fun listenNow(context: Context): Boolean = start(context, listenNowIntent(context))
+
+        /** Keep the mic service (and its popup) up for a live task. */
+        fun keepRunningForLive(context: Context): Boolean =
+            start(context, Intent(context, WakeWordService::class.java).setAction(ACTION_KEEP_ALIVE))
 
         /** Turn off always-listening. */
         fun turnOff(context: Context) {

@@ -1,6 +1,9 @@
 # Live tasks — implementation plan
 
-> Status: **proposed** (2026-10-11). Nothing here is built yet.
+> Status: **built (2026-10-11), not yet tested on a phone.** Owner's decisions (§7): words start / capture / stop,
+> English (India) model only, no time limit (listens until a stop word), no mic-test screen (Phase 0 skipped).
+> Built: Phases 1–7 and the unit tests of Phase 9. Not built: target pinning (taps use the normal node lookup in
+> quick mode), the one-time LLM lookup for unknown camera buttons, Phase 8 (only if needed).
 > Goal: AURA keeps listening *inside any app* and reacts to words you choose.
 
 ## 1. What the user gets

@@ -53,7 +53,9 @@ class AppShortcutsTest {
         for (s in file.skills) {
             assertTrue("${s.name}: bad risk ${s.risk}", s.risk in setOf("LOW", "MEDIUM", "HIGH", "CRITICAL"))
             assertTrue("${s.name}: no steps", s.steps.isNotEmpty())
-            for (st in s.steps) assertTrue("${s.name}: unknown action ${st.action}", st.action in knownActions)
+            for (st in s.steps.flatMap { it.flatten() }) {
+                assertTrue("${s.name}: unknown action ${st.action}", st.action in knownActions)
+            }
             // A risky skill must ask before it acts.
             if (s.risk == "HIGH" || s.risk == "CRITICAL") {
                 assertTrue("${s.name}: HIGH risk without confirm_send/reply",
@@ -80,6 +82,26 @@ class AppShortcutsTest {
             assertNotNull("${s.name}: \"$goal\" didn't match its own pattern", params)
             val withDerived = params!! + mapOf("contact_number" to "+911234567890", "contact_number_digits" to "911234567890")
             assertNotNull("${s.name}: steps left unfilled", SkillMatcher.fill(s.steps, withDerived))
+        }
+    }
+
+    @Test fun `live tasks are safe and well formed`() {
+        val policy = com.aura.policy.PolicyEngine()
+        for (s in file.skills) for (listen in s.steps.filter { it.action == ActionStep.LISTEN }) {
+            assertTrue("${s.name}: listen must be the last step", s.steps.last() === listen)
+            val triggers = listen.triggers.orEmpty()
+            assertTrue("${s.name}: listen without triggers", triggers.isNotEmpty())
+            for (t in triggers) {
+                assertTrue("${s.name}: trigger without words", t.words.isNotEmpty() && t.words.all { it.isNotBlank() })
+                assertTrue("${s.name}: trigger without steps", t.then.isNotEmpty())
+            }
+            // Trigger steps run without asking: nothing that needs approval.
+            for (st in listen.flatten().drop(1)) {
+                val risk = policy.classify(st)
+                assertTrue("${s.name}: ${st.action} is $risk inside a live task",
+                    risk != com.aura.agent.RiskLevel.HIGH && risk != com.aura.agent.RiskLevel.CRITICAL)
+                assertTrue("${s.name}: nested listen", st.action != ActionStep.LISTEN)
+            }
         }
     }
 

@@ -44,6 +44,17 @@ sealed class TaskState {
      */
     data class WaitingForUnlock(val appName: String?) : TaskState()
 
+    /**
+     * A live task is listening: each of [words] runs its steps when heard (until a stop word).
+     * [fired] = words acted on so far, [lastHeard] = the latest, [status] = a note to show (or null).
+     */
+    data class Live(
+        val words: List<String>,
+        val fired: Int,
+        val lastHeard: String?,
+        val status: String?
+    ) : TaskState()
+
     /** All steps executed — agent is verifying the outcome. */
     data object Verifying : TaskState()
 

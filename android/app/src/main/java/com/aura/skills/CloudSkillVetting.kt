@@ -43,31 +43,43 @@ object CloudSkillVetting {
         if (steps.isEmpty()) return "no steps"
         if (steps.size > MAX_STEPS) return "too many steps (${steps.size})"
 
+        if (steps.flatMap { it.flatten() }.size > MAX_STEPS * 2) return "too many steps"
         var confirmed = false
         for (st in steps) {
-            val action = st.action.trim().lowercase()
-            if (action !in ActionStep.KNOWN_ACTIONS) return "unknown action $action"
-            if (action == ActionStep.CLARIFY) return "contains a clarify step"
-            when (action) {
-                ActionStep.CONFIRM_SEND -> confirmed = true
-                ActionStep.INTENT -> {
-                    val intentAction = st.intentAction?.trim().orEmpty().ifEmpty { "android.intent.action.VIEW" }
-                    val uri = st.uri?.let { parseUri(it.replace(SLOT, "x")) }
-                    if (!ActionExecutor.isAllowedIntent(intentAction, uri, st.mime)) return "intent $intentAction not allowed"
-                    if (isUpi(st.uri) && !confirmed) return "payment link without confirmation"
-                }
-                ActionStep.OPEN_LINK -> {
-                    val scheme = st.uri?.substringBefore(':')?.trim()?.lowercase()
-                        ?: return "link step without a link"
-                    if (scheme !in LINK_SCHEMES) return "link scheme $scheme not allowed"
-                    if (isUpi(st.uri) && !confirmed) return "payment link without confirmation"
-                }
-                ActionStep.TAP -> {
-                    val target = listOfNotNull(st.text, st.viewId?.substringAfter(":id/")?.replace('_', ' '))
-                        .joinToString(" ")
-                    if (!confirmed && COMMITTING_TAP.containsMatchIn(target)) {
-                        return "taps \"$target\" without asking first"
-                    }
+            stepProblem(st, confirmed, parseUri)?.let { return it }
+            if (st.action.trim().lowercase() == ActionStep.CONFIRM_SEND) confirmed = true
+            // Steps a live task runs on a spoken word never get a confirmation, so they
+            // must be harmless on their own.
+            for (nested in st.flatten().drop(1)) {
+                if (nested.action.trim().lowercase() == ActionStep.LISTEN) return "nested listen"
+                stepProblem(nested, false, parseUri)?.let { return "live step: $it" }
+            }
+        }
+        return null
+    }
+
+    private fun stepProblem(st: ActionStep, confirmed: Boolean, parseUri: (String) -> Uri?): String? {
+        val action = st.action.trim().lowercase()
+        if (action !in ActionStep.KNOWN_ACTIONS) return "unknown action $action"
+        when (action) {
+            ActionStep.CLARIFY -> return "contains a clarify step"
+            ActionStep.INTENT -> {
+                val intentAction = st.intentAction?.trim().orEmpty().ifEmpty { "android.intent.action.VIEW" }
+                val uri = st.uri?.let { parseUri(it.replace(SLOT, "x")) }
+                if (!ActionExecutor.isAllowedIntent(intentAction, uri, st.mime)) return "intent $intentAction not allowed"
+                if (isUpi(st.uri) && !confirmed) return "payment link without confirmation"
+            }
+            ActionStep.OPEN_LINK -> {
+                val scheme = st.uri?.substringBefore(':')?.trim()?.lowercase()
+                    ?: return "link step without a link"
+                if (scheme !in LINK_SCHEMES) return "link scheme $scheme not allowed"
+                if (isUpi(st.uri) && !confirmed) return "payment link without confirmation"
+            }
+            ActionStep.TAP -> {
+                val target = listOfNotNull(st.text, st.viewId?.substringAfter(":id/")?.replace('_', ' '))
+                    .joinToString(" ")
+                if (!confirmed && COMMITTING_TAP.containsMatchIn(target)) {
+                    return "taps \"$target\" without asking first"
                 }
             }
         }

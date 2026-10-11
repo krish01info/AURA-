@@ -66,8 +66,26 @@ data class ActionStep(
      * Intent extras. Values are strings; prefix "i:" for Int, "l:" for Long,
      * "b:" for Boolean (e.g. "b:true"). `{slot}`s are filled like other fields.
      */
-    val extras: Map<String, String>? = null
+    val extras: Map<String, String>? = null,
+
+    // ── Live task (action "listen") ─────────────────────────
+    /** Words that each run some steps while AURA keeps listening (see [Trigger]). */
+    val triggers: List<Trigger>? = null,
+
+    /** Words that end the live task (default "stop"). */
+    @SerialName("stop_words") val stopWords: List<String>? = null,
+
+    /** Steps run once when a stop word is heard (e.g. tap "Stop recording"). */
+    @SerialName("on_stop") val onStop: List<ActionStep>? = null,
+
+    /** Optional limit in seconds; null = until a stop word. */
+    @SerialName("timeout_s") val timeoutS: Int? = null
 ) {
+    /** This step plus every step nested inside it (trigger steps, on_stop), depth-first. */
+    fun flatten(): List<ActionStep> =
+        listOf(this) + triggers.orEmpty().flatMap { t -> t.then.flatMap { it.flatten() } } +
+            onStop.orEmpty().flatMap { it.flatten() }
+
     companion object {
         // Supported action primitives
         const val OPEN_APP          = "open_app"
@@ -110,6 +128,12 @@ data class ActionStep(
         /** Read recent notifications aloud: optional app [pkg], optional person [text]. Needs notification access. */
         const val READ_NOTIFICATIONS = "read_notifications"
 
+        /**
+         * Live task: keep listening (offline) and run [triggers] each time their word is heard,
+         * until a [stopWords] word (then [onStop]). Always the last step of a plan.
+         */
+        const val LISTEN = "listen"
+
         /** Every action this app version can run. Shortcuts using anything else are skipped (newer file, older app). */
         val KNOWN_ACTIONS = setOf(
             OPEN_APP,
@@ -136,10 +160,24 @@ data class ActionStep(
             MEDIA,
             NOW_PLAYING,
             REPLY,
-            READ_NOTIFICATIONS
+            READ_NOTIFICATIONS,
+            LISTEN
         )
     }
 }
+
+/**
+ * One word of a live task: when any of [words] is heard, run [then].
+ * [once] = only the first time (e.g. "start" recording); [cooldownMs] ignores repeats
+ * of the same word heard within that time.
+ */
+@Serializable
+data class Trigger(
+    val words: List<String>,
+    val then: List<ActionStep>,
+    val once: Boolean = false,
+    @SerialName("cooldown_ms") val cooldownMs: Long = 800L
+)
 
 /**
  * A structured goal parsed from the user's natural language input.

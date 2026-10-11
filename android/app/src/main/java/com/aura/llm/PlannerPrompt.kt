@@ -84,6 +84,14 @@ Screen steps:
 - {"action":"verify","pkg":"<app that should be in front>","text":"<text visible when done>"}
 - {"action":"clarify","clarification":"<question for the user>"}
 
+Live tasks — the goal says "when I say / whenever I say / every time I say <word>": end with ONE listen step
+(AURA keeps listening offline and runs a word's steps each time it's heard), no verify after it:
+- {"action":"listen","triggers":[{"words":["{photo_word}"],"then":[{"action":"tap","text":"Shutter|Capture|Take photo"}]},
+   {"words":["start"],"once":true,"then":[{"action":"tap","text":"Record|Start recording"}]}],
+   "stop_words":["stop"],"on_stop":[{"action":"tap","text":"Stop|Stop recording"}]}
+  Trigger steps run WITHOUT asking: never sends, posts, payments or deletes. "text" may list labels with |.
+  Spoken trigger words go in params (photo_word, next_word…).
+
 Rules:
 1. After open_app or open_link add a wait of 1500-2500 ms.
 2. Put confirm_send right BEFORE any final send/post/submit tap (risk HIGH) or payment/purchase/delete tap (risk CRITICAL).
