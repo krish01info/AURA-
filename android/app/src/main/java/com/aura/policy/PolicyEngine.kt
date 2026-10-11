@@ -47,7 +47,9 @@ class PolicyEngine @Inject constructor() {
         ActionStep.WAIT,
         ActionStep.FIND_ELEMENT,
         ActionStep.READ_TEXT,
-        ActionStep.VERIFY        -> RiskLevel.LOW
+        ActionStep.VERIFY,
+        // The words' own steps are checked by LiveTaskRunner before listening starts.
+        ActionStep.LISTEN        -> RiskLevel.LOW
 
         // LOW — shortcuts only OPEN an app / set a reminder; nothing is sent or paid.
         // (A send still needs a tap, which the planner gates with confirm_send.)

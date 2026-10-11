@@ -128,7 +128,14 @@ class ActionExecutor @Inject constructor(
     // Dispatch
     // ──────────────────────────────────────────────────────────────
 
-    suspend fun execute(step: ActionStep): StepResult {
+    /** Package of the app on screen now (null if unknown). */
+    fun foregroundPackage(): String? = service?.rootInActiveWindow?.packageName?.toString()
+
+    /**
+     * @param quick live-task mode: a tap doesn't wait for the screen to react (a camera
+     *   shutter may not change anything AURA can see) and nothing waits to settle afterwards.
+     */
+    suspend fun execute(step: ActionStep, quick: Boolean = false): StepResult {
         Log.d(TAG, "Executing: ${step.action} | ${step.text ?: step.pkg ?: step.inputText ?: ""}")
         if (service == null && step.action !in NO_SERVICE_NEEDED) {
             return StepResult.fail("AURA's Accessibility service is off. Turn it on in Settings → Accessibility.")
@@ -136,7 +143,7 @@ class ActionExecutor @Inject constructor(
         val result = try {
             when (step.action) {
                 ActionStep.OPEN_APP     -> openApp(step.pkg, step.text)
-                ActionStep.TAP          -> tap(step.text, step.viewId)
+                ActionStep.TAP          -> tap(step.text, step.viewId, requireChange = !quick)
                 // type: input_text = what to type; viewId / text = which field (its id or label)
                 ActionStep.TYPE         -> if (step.inputText != null) typeText(step.inputText, step.text, step.viewId)
                                            else typeText(step.text, null, step.viewId)
@@ -152,6 +159,7 @@ class ActionExecutor @Inject constructor(
                     StepResult.OK
                 }
                 ActionStep.CONFIRM_SEND -> StepResult.OK // gate handled by TaskManager
+                ActionStep.LISTEN       -> StepResult.fail("A live task must be run by TaskManager.")
                 ActionStep.READ_TEXT    -> StepResult(true, output = readText(step.text))
                 ActionStep.VERIFY       -> verify(step.pkg, step.text)
                 ActionStep.DIAL         -> dial(step.number)
@@ -175,7 +183,7 @@ class ActionExecutor @Inject constructor(
         }
         if (!result.ok) Log.w(TAG, "Step failed: ${step.action} → ${result.error}")
         // Let the UI settle before the next step (ends early when the screen is quiet).
-        if (result.ok && step.action !in NO_SETTLE) uiObserver.waitForStable(quietMs = 300, minMs = 150, maxMs = 1500)
+        if (result.ok && !quick && step.action !in NO_SETTLE) uiObserver.waitForStable(quietMs = 300, minMs = 150, maxMs = 1500)
         return result
     }
 
@@ -233,7 +241,7 @@ class ActionExecutor @Inject constructor(
      * Retries while the screen loads, and FAILS if the screen doesn't react to the tap,
      * so later steps never run on the wrong screen.
      */
-    suspend fun tap(text: String?, viewId: String?): StepResult {
+    suspend fun tap(text: String?, viewId: String?, requireChange: Boolean = true): StepResult {
         if (text.isNullOrBlank() && viewId.isNullOrBlank()) return StepResult.fail("Tap step had no target.")
         val node = waitForNode(text, viewId, NodeFinder.Purpose.TAP)
             ?: return StepResult.fail("I couldn't find \"${text ?: viewId}\" on the screen.")
@@ -247,7 +255,7 @@ class ActionExecutor @Inject constructor(
                 return StepResult.fail("I found \"${text ?: viewId}\" but couldn't tap it.")
             }
         }
-        if (!uiObserver.waitForChange(before, TAP_EFFECT_TIMEOUT_MS)) {
+        if (requireChange && !uiObserver.waitForChange(before, TAP_EFFECT_TIMEOUT_MS)) {
             return StepResult.fail("Tapping \"${text ?: viewId}\" didn't change anything on the screen.")
         }
         return StepResult.OK
@@ -368,11 +376,14 @@ class ActionExecutor @Inject constructor(
         viewId: String?,
         purpose: NodeFinder.Purpose
     ): AccessibilityNodeInfo? {
+        // "Record|Start recording|Shutter": labels differ between phones — try each in order.
+        val options = text?.split('|')?.map { it.trim() }?.filter { it.isNotEmpty() }
+            ?.takeIf { it.isNotEmpty() } ?: listOf(text)
         val deadline = System.currentTimeMillis() + FIND_TIMEOUT_MS
         while (true) {
             val root = service?.rootInActiveWindow
             if (root != null) {
-                nodeFinder.findBest(root, text, viewId, purpose)?.let { return it }
+                for (option in options) nodeFinder.findBest(root, option, viewId, purpose)?.let { return it }
             }
             if (System.currentTimeMillis() > deadline) return null
             delay(FIND_POLL_MS)

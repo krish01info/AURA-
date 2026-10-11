@@ -114,6 +114,9 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.okhttp)
+    // Live tasks: offline keyword spotting. JNA must be the Android AAR, not the desktop jar.
+    implementation(libs.vosk.android)
+    implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

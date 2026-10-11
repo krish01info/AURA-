@@ -82,7 +82,8 @@ class TaskManager @Inject constructor(
     private val injectionDefender: PromptInjectionDefender,
     private val anomalyDetector: AnomalyDetector,
     private val permissionManager: AppPermissionManager,
-    private val contactResolver: ContactResolver
+    private val contactResolver: ContactResolver,
+    private val liveTaskRunner: LiveTaskRunner
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val patternJson = Json { ignoreUnknownKeys = true }
@@ -98,7 +99,7 @@ class TaskManager @Inject constructor(
     /** True while a task is planning, running or waiting for approval. */
     val isBusy: Boolean
         get() = when (_state.value) {
-            is TaskState.Planning, is TaskState.Executing, is TaskState.WaitingForUnlock,
+            is TaskState.Planning, is TaskState.Executing, is TaskState.WaitingForUnlock, is TaskState.Live,
             is TaskState.WaitingForUser, is TaskState.Verifying -> true
             else -> false
         }
@@ -536,6 +537,24 @@ class TaskManager @Inject constructor(
                 auditLogger.logAutoExecuted(taskId, step, effectiveRisk)
             }
 
+            // A live task keeps listening and runs its words' steps until a stop word.
+            if (step.action == ActionStep.LISTEN) {
+                val result = liveTaskRunner.run(
+                    step,
+                    approve = { gate ->
+                        voiceManager.announceConfirmation(gate, RiskLevel.HIGH)
+                        suspendForApproval(gate, RiskLevel.HIGH)
+                    },
+                    onState = { _state.value = it }
+                )
+                if (result is LiveTaskRunner.Result.Failed) {
+                    // Re-planning can't fix a blocked mic or a missing model — fail with the reason.
+                    fail(taskId, goal, result.reason)
+                    return RunOutcome.Stopped
+                }
+                continue
+            }
+
             _state.value = if (step.action == ActionStep.VERIFY) TaskState.Verifying
                 else TaskState.Executing(step, index, steps.size)
             if (step.action != ActionStep.VERIFY) voiceManager.narrateStep(step)
@@ -660,7 +679,8 @@ class TaskManager @Inject constructor(
         /** Plans with these finish outside any app screen — no automatic "app in front" check. */
         val NO_AUTO_VERIFY = setOf(
             ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
-            ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS
+            ActionStep.MEDIA, ActionStep.NOW_PLAYING, ActionStep.REPLY, ActionStep.READ_NOTIFICATIONS,
+            ActionStep.LISTEN
         )
         const val ACCESSIBILITY_OFF =
             "Please turn on AURA in your phone's Accessibility settings first, so I can control apps."

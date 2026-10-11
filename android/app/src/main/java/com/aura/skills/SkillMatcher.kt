@@ -175,10 +175,15 @@ object SkillMatcher {
         pattern.replace(SLOT, "").replace(" ", "").length
 
     /**
-     * Replace `{slot}` in every text field of [steps] with [params].
-     * Returns null if any slot is left unfilled (the skill can't be used safely).
+     * Replace `{slot}` in every text field of [steps] with [params] (also inside live-task
+     * triggers and on_stop). Returns null if any slot is left unfilled (the skill can't be used safely).
      */
     fun fill(steps: List<ActionStep>, params: Map<String, String>): List<ActionStep>? {
+        val filled = fillAll(steps, params)
+        return if (slotsInSteps(filled).isNotEmpty()) null else filled
+    }
+
+    private fun fillAll(steps: List<ActionStep>, params: Map<String, String>): List<ActionStep> {
         fun f(s: String?): String? = s?.let { text ->
             SLOT.replace(text) { m -> params[m.groupValues[1]] ?: m.value }
         }
@@ -186,26 +191,31 @@ object SkillMatcher {
         fun u(s: String?): String? = s?.let { text ->
             SLOT.replace(text) { m -> params[m.groupValues[1]]?.let(::encode) ?: m.value }
         }
-        val filled = steps.map { st ->
+        return steps.map { st ->
             st.copy(
                 pkg = f(st.pkg), text = f(st.text), viewId = f(st.viewId),
                 inputText = f(st.inputText), message = f(st.message),
                 clarification = f(st.clarification),
                 uri = u(st.uri), number = f(st.number), time = f(st.time),
                 intentAction = f(st.intentAction), mime = f(st.mime),
-                extras = st.extras?.mapValues { (_, v) -> f(v) ?: v }
+                extras = st.extras?.mapValues { (_, v) -> f(v) ?: v },
+                triggers = st.triggers?.map { t ->
+                    t.copy(words = t.words.map { f(it) ?: it }, then = fillAll(t.then, params))
+                },
+                stopWords = st.stopWords?.map { f(it) ?: it },
+                onStop = st.onStop?.let { fillAll(it, params) }
             )
         }
-        return if (slotsInSteps(filled).isNotEmpty()) null else filled
     }
 
-    /** Slot names still present in the steps' text fields. */
+    /** Slot names still present in the steps' text fields (nested live-task steps included). */
     fun slotsInSteps(steps: List<ActionStep>): Set<String> =
-        steps.flatMap { st -> textFields(st).flatMap { slots(it) } }.toSet()
+        steps.flatMap { it.flatten() }.flatMap { st -> textFields(st).flatMap { slots(it) } }.toSet()
 
     private fun textFields(st: ActionStep): List<String> =
         listOfNotNull(st.pkg, st.text, st.viewId, st.inputText, st.message, st.uri, st.number, st.time,
-            st.intentAction, st.mime) + st.extras?.values.orEmpty()
+            st.intentAction, st.mime) + st.extras?.values.orEmpty() +
+            st.triggers.orEmpty().flatMap { it.words } + st.stopWords.orEmpty()
 
     /** URL-encode for use inside a link (spaces as %20, not +). */
     fun encode(value: String): String =
@@ -239,13 +249,17 @@ object SkillMatcher {
             }
             return out
         }
-        return steps.map { st ->
+        fun all(list: List<ActionStep>): List<ActionStep> = list.map { st ->
             st.copy(
                 text = t(st.text), inputText = t(st.inputText), message = t(st.message),
                 number = t(st.number), time = t(st.time), uri = tu(st.uri),
-                extras = st.extras?.mapValues { (_, v) -> t(v) ?: v }
+                extras = st.extras?.mapValues { (_, v) -> t(v) ?: v },
+                triggers = st.triggers?.map { tr -> tr.copy(words = tr.words.map { t(it) ?: it }, then = all(tr.then)) },
+                stopWords = st.stopWords?.map { t(it) ?: it },
+                onStop = st.onStop?.let { all(it) }
             )
         }
+        return all(steps)
     }
 
     /**
