@@ -1,11 +1,6 @@
 package com.aura.ui.viewmodel
 
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.provider.Settings
 import android.util.Log
 import androidx.fragment.app.FragmentActivity
@@ -19,7 +14,6 @@ import com.aura.data.model.ActionStep
 import com.aura.policy.BiometricGate
 import com.aura.voice.FloatingBubble
 import com.aura.voice.VoiceManager
-import com.aura.voice.VoskEngine
 import com.aura.voice.WakeWordService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -37,13 +31,16 @@ private const val TAG = "HomeViewModel"
 /**
  * ViewModel for [HomeScreen].
  * Bridges UI with [TaskManager], [VoiceManager], [BiometricGate], and [FloatingBubble].
+ *
+ * All voice input goes through [WakeWordService] (the assistant service), so the
+ * in-app mic button, the floating bubble and "Hey AURA" share one listening path
+ * and the same popup.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val taskManager: TaskManager,
     private val voiceManager: VoiceManager,
-    private val voskEngine: VoskEngine,
     private val biometricGate: BiometricGate,
     private val floatingBubble: FloatingBubble
 ) : ViewModel() {
@@ -60,39 +57,26 @@ class HomeViewModel @Inject constructor(
     private val _isAccessibilityEnabled = MutableStateFlow(false)
     val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
 
-    private val _isVoiceEnabled = MutableStateFlow(false)
+    private val _isVoiceEnabled = MutableStateFlow(WakeWordService.isWakeEnabled(context))
     val isVoiceEnabled: StateFlow<Boolean> = _isVoiceEnabled.asStateFlow()
 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
-    // Wake word broadcast receiver
-    private val wakeWordReceiver = object : BroadcastReceiver() {
-        override fun onReceive(ctx: Context, intent: Intent) {
-            when (intent.action) {
-                WakeWordService.ACTION_WAKE_WORD_DETECTED -> {
-                    Log.i(TAG, "Wake word detected — starting voice input")
-                    startVoiceInput()
-                }
-                WakeWordService.ACTION_STOP_COMMAND -> {
-                    Log.i(TAG, "Stop command received via voice")
-                    emergencyStop()
-                }
-            }
-        }
-    }
-
     init {
         pollAccessibilityStatus()
-        registerWakeWordReceiver()
+        // Voice mode was left on last time — resume listening for "Hey AURA".
+        // (Started here because the app is in the foreground, which Android requires
+        // for a microphone service.)
+        if (_isVoiceEnabled.value) {
+            WakeWordService.startWake(context)
+            if (floatingBubble.canShow()) floatingBubble.show(onTap = { startVoiceInput() })
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
-        try {
-            context.unregisterReceiver(wakeWordReceiver)
-        } catch (_: Exception) { }
-        floatingBubble.hide()
+        // The bubble and the assistant service keep running in the background on purpose.
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -146,25 +130,12 @@ class HomeViewModel @Inject constructor(
     // ──────────────────────────────────────────────────────────────
 
     /**
-     * Start voice input. Tries online SpeechRecognizer first;
-     * falls back to VoskEngine (offline) if device has no internet.
+     * Listen for one spoken command. The assistant service shows the popup,
+     * captures the command and runs it — same flow as saying "Hey AURA".
      */
     fun startVoiceInput() {
-        viewModelScope.launch {
-            val transcript = if (isOnline()) {
-                voiceManager.recognizeSpeech()
-            } else {
-                Log.i(TAG, "Offline — trying Vosk STT")
-                voskEngine.recognizeSpeech() ?: voiceManager.recognizeSpeech()
-            }
-
-            if (transcript != null) {
-                Log.i(TAG, "Voice command: \"$transcript\"")
-                executeCommand(transcript)
-            } else {
-                voiceManager.speak("Sorry, I didn't catch that.")
-                _statusMessage.value = "Didn't catch that — try again"
-            }
+        if (!WakeWordService.listenNow(context)) {
+            _statusMessage.value = "Couldn't start the microphone — check AURA's permissions"
         }
     }
 
@@ -172,17 +143,19 @@ class HomeViewModel @Inject constructor(
     // Wake word service (Phase 4)
     // ──────────────────────────────────────────────────────────────
 
-    /** Start/stop the WakeWordService and the floating bubble. */
+    /** Turn "Hey AURA" always-listening (and the floating bubble) on or off. Remembered. */
     fun setVoiceEnabled(enabled: Boolean) {
         _isVoiceEnabled.value = enabled
         if (enabled) {
-            context.startForegroundService(WakeWordService.startIntent(context))
+            if (!WakeWordService.startWake(context)) {
+                _statusMessage.value = "Couldn't start voice mode — check AURA's permissions"
+            }
             if (floatingBubble.canShow()) {
                 floatingBubble.show(onTap = { startVoiceInput() })
             }
-            voiceManager.speak("Voice mode on. Say Hey AURA to activate me.")
+            voiceManager.speak("Voice mode on. Say Hey AURA from any app.")
         } else {
-            context.stopService(WakeWordService.startIntent(context))
+            WakeWordService.turnOff(context)
             floatingBubble.hide()
             voiceManager.speak("Voice mode off.")
         }
@@ -252,18 +225,6 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun registerWakeWordReceiver() {
-        val filter = IntentFilter().apply {
-            addAction(WakeWordService.ACTION_WAKE_WORD_DETECTED)
-            addAction(WakeWordService.ACTION_STOP_COMMAND)
-        }
-        try {
-            context.registerReceiver(wakeWordReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register wake word receiver: ${e.message}")
-        }
-    }
-
     private fun isAccessibilityServiceEnabled(): Boolean {
         val expected = "${context.packageName}/${AURAAccessibilityService::class.java.name}"
         val enabled = Settings.Secure.getString(
@@ -271,12 +232,5 @@ class HomeViewModel @Inject constructor(
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
         return enabled.contains(expected)
-    }
-
-    private fun isOnline(): Boolean {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

@@ -12,7 +12,7 @@ Learned skills (stored step lists) so repeat goals skip the LLM. Design: `docs/d
 | OsFingerprint.kt | Detects OS class, skin (MIUI / OneUI / …) and API level. |
 | OsMigrationHandler.kt | On app start, detects an Android upgrade and marks old-OS skills stale. |
 | SkillHealthMonitor.kt | HEALTHY ≥ 0.85 success, DEGRADED ≥ 0.60, else BROKEN. |
-| SkillUpdater.kt | Self-healing based on health (mark stale, evict, re-plan). **Not called from anywhere yet.** |
+| SkillUpdater.kt | Self-healing: `TaskManager` reports each stored-skill run (`recordSuccess` / `handleFailure`); broken skills go stale and get re-planned. |
 | SkillSeeder.kt | Static seed skills inserted on first install (large, data only). |
 
 ## Rules

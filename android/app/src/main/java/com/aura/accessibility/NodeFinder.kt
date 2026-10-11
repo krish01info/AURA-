@@ -27,10 +27,15 @@ class NodeFinder @Inject constructor() {
         root: AccessibilityNodeInfo,
         text: String?,
         viewId: String?
-    ): AccessibilityNodeInfo? = when {
-        viewId != null -> root.findAccessibilityNodeInfosByViewId(viewId).firstOrNull()
-        text != null   -> root.findAccessibilityNodeInfosByText(text).firstOrNull()
-        else           -> null
+    ): AccessibilityNodeInfo? {
+        // View ID first (most stable), then fall back to text if the ID isn't on screen.
+        if (!viewId.isNullOrBlank()) {
+            root.findAccessibilityNodeInfosByViewId(viewId).firstOrNull()?.let { return it }
+        }
+        if (!text.isNullOrBlank()) {
+            return root.findAccessibilityNodeInfosByText(text).firstOrNull()
+        }
+        return null
     }
 
     /**

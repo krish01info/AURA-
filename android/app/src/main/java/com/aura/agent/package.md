@@ -4,19 +4,19 @@ Owns the task execution lifecycle.
 
 | File | Role |
 |---|---|
-| TaskManager.kt | Entry point. `execute(goal)` / `executeDirectSteps()`. Orchestrates everything. (~400 lines — open the function you need) |
-| ActionExecutor.kt | Turns an `ActionStep` into a real gesture via the AccessibilityService. Also `getUiSnapshot()`. |
-| SkillRouter.kt | Skill lookup L1 RAM (`SkillCache`) → L2 disk (`SkillDiskCache`) → L3 Room. Scores candidates (keywords, success rate, usage, verified, device). `null` → LLM plans. |
+| TaskManager.kt | Entry point. `execute(goal)` / `executeDirectSteps()`. Orchestrates everything; `setupProblem()` explains what's missing (Accessibility off, no API key). (~460 lines — open the function you need) |
+| ActionExecutor.kt | Turns an `ActionStep` into a real action via the AccessibilityService and returns a `StepResult` (ok / user-readable error). Waits up to 4 s for nodes; opens apps by package or by app name. |
+| SkillRouter.kt | Skill lookup L1 RAM (`SkillCache`) → L2 disk (`SkillDiskCache`) → L3 Room. Scores candidates. `null` → LLM plans. |
 | TaskState.kt | Sealed states: Created / Planning / Executing / WaitingForUser / Verifying / Completed / Failed / Cancelled |
-| AURAForegroundService.kt | Foreground service with a notification so Android doesn't kill the agent. |
-| BootReceiver.kt | Restarts the service after reboot. |
 
 ## Key flow in TaskManager
-1. Sanitize goal → 2. `SkillRouter` hit? yes → run stored steps / no → memory + UI snapshot + LLM plan
-3. New LLM plan → `SkillLearner.learnFromSuccess()` right away (before the steps run)
-4. `runStepsInternal`: per step `AppPermissionManager` → `PolicyEngine` → LOW/MEDIUM auto-run, HIGH/CRITICAL wait for the user
-5. End: `MemoryManager.remember(goal, success|failure, app)`
+1. Sanitize goal; stop early with a spoken reason if `setupProblem()` is not null
+2. Stored skill? run it → success: `SkillUpdater.recordSuccess` / a step fails: `SkillUpdater.handleFailure`, then re-plan with the LLM once
+3. LLM plan: Groq → Gemini fallback (`LlmException` messages are spoken to the user)
+4. `runStepsInternal`: per step `AppPermissionManager` → `PolicyEngine` → LOW/MEDIUM run, HIGH/CRITICAL wait for approval; **stops at the first failed step**
+5. Success → `SkillLearner.learnFromSuccess()` (only after the plan worked) + `MemoryManager.remember`
 
 ## Rules
-- New action type → constant in `ActionStep` companion + branch in `ActionExecutor.execute()`.
+- New action type → constant in `ActionStep` companion + branch in `ActionExecutor.execute()` returning a `StepResult` + line in `llm/PlannerPrompt.SYSTEM`.
 - Never decide risk here; ask `PolicyEngine.classify()`.
+- The Accessibility service keeps the process alive; there is no separate keep-alive service.

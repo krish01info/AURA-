@@ -63,12 +63,12 @@ AURA uses Android's **Accessibility Service** to observe and control apps on you
 | Learned skills | Saves successful plans so repeat goals skip the LLM; RAM → disk → DB cache | Built |
 | Community skill store | Share and download skills through Supabase | Built (optional) |
 | Long-term memory | Recalls similar past tasks, fully offline | Built |
-| Voice | Wake word ("Hey AURA"), speech input, spoken narration | Built (online STT) |
+| Voice assistant | Say "Hey AURA" from any app: a popup listens, runs the task, asks before risky steps (tap or say yes/no) | Built (online STT) |
 | Biometric gate | Fingerprint/face before critical actions | Built |
 | Macros | Run a named list of goals in sequence | Built |
 | Dashboard and task log | Stats and audit history | Built |
 | Self-update | Checks GitHub Releases and installs the new APK | Built |
-| Self-healing skills | Repairs skills whose success rate drops | Partly built (not wired in yet) |
+| Self-healing skills | A stored skill that fails is reported and re-planned by the LLM | Built |
 | Offline speech | Vosk on-device STT | Planned (stub) |
 | On-device LLM | Gemma / Phi-3 for offline planning | Planned |
 | Low-power wake word | Picovoice Porcupine | Planned |
@@ -123,10 +123,12 @@ Full code map for contributors and AI tools: [AGENTS.md](AGENTS.md).
 
 | Model | Provider | Role |
 |---|---|---|
-| `llama-3.3-70b-versatile` | Groq | Default |
-| `llama-3.1-8b-instant` | Groq | Fast fallback |
-| `gemma2-9b-it` | Groq | Last Groq fallback |
-| `gemini-1.5-flash` | Google AI Studio | Fallback when Groq fails |
+| `openai/gpt-oss-120b` | Groq | Default |
+| `openai/gpt-oss-20b` | Groq | Fast fallback |
+| `qwen/qwen3.8-27b` | Groq | Last Groq fallback |
+| `gemini-2.5-flash` | Google AI Studio | Fallback when Groq fails or has no key |
+
+Add your keys in the app's **Settings** screen (free keys: console.groq.com, aistudio.google.com).
 
 **Speech:** Android `SpeechRecognizer` (STT and wake-word loop), Android `TextToSpeech`.
 
@@ -219,8 +221,8 @@ Permissions used: Accessibility service, microphone, overlay (floating bubble), 
 git clone https://github.com/krish01info/AURA-.git
 cd AURA-
 
-# 2. Add keys: copy the values from .env.example into android/local.properties
-#    GROQ_API_KEY is required; GEMINI_API_KEY and SUPABASE_* are optional.
+# 2. (Optional) build-time keys: copy .env.example values into android/local.properties.
+#    Or skip this and enter your Groq / Gemini key in the app's Settings screen.
 
 # 3. Build and run
 cd android
@@ -228,6 +230,8 @@ cd android
 ./gradlew testDebugUnitTest    # unit tests
 
 # 4. On the device: Settings → Accessibility → AURA → turn on
+# 5. In AURA: add a Groq (or Gemini) key in Settings, then turn on Voice mode
+#    and say "Hey AURA, open YouTube" from any app.
 ```
 
 ---

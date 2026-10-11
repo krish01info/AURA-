@@ -1,5 +1,6 @@
 package com.aura.voice
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,16 +8,28 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import com.aura.agent.RiskLevel
+import com.aura.agent.TaskManager
+import com.aura.agent.TaskState
 import com.aura.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -27,40 +40,55 @@ import javax.inject.Inject
 private const val TAG = "WakeWordService"
 private const val CHANNEL_ID = "aura_wake_word"
 private const val NOTIF_ID = 2001
+private const val PREFS = "aura_assistant"
+private const val PREF_WAKE_ENABLED = "wake_word_enabled"
 
 /**
- * WakeWordService — continuously listens for "Hey AURA" in the background.
+ * WakeWordService — AURA's assistant. Owns the whole voice flow, so it works over
+ * any app, with AURA's own screen closed:
  *
- * Phase 4 implementation — two modes:
+ *   "Hey AURA" ─► popup + beep ─► listen for the command ─► TaskManager.execute
+ *        │                                     ▲
+ *        └─ "Hey AURA, open YouTube" ──────────┘  (command in the same sentence)
  *
- * MODE A (current): Android SpeechRecognizer in continuous loop.
- *   - Uses online recognition with Google Cloud STT.
- *   - Restarts automatically after each timeout/result.
- *   - Detects WAKE_WORDS list — fires [onWakeWord] when found.
- *   - Works without any paid API key.
+ *   Task progress, Allow/Deny approvals, and the result are shown in
+ *   [AssistantOverlay]; HIGH-risk steps can also be approved by voice
+ *   ("yes" / "no"). "Hey AURA, stop" cancels a running task.
  *
- * MODE B (planned): Picovoice Porcupine (ultra-low power, offline).
- *   - 10x more battery efficient than MODE A.
- *   - Requires a free Porcupine AccessKey from Picovoice Console.
- *   - Add dependency: implementation("ai.picovoice:porcupine-android:3.0.1")
- *   - Replace the recognition loop with Porcupine.Builder().build() in onCreate()
+ * Wake detection uses Android's SpeechRecognizer in a loop that restarts only after
+ * each session ends (result or error). Note: some phones play a short sound each
+ * time recognition starts, and the loop uses more battery than a dedicated
+ * wake-word engine (Picovoice Porcupine is the planned upgrade).
  *
- * Communication:
- *   - Broadcasts Intent(ACTION_WAKE_WORD_DETECTED) to MainActivity / HomeViewModel
- *   - HomeViewModel calls taskManager.execute() after receiving the broadcast
- *
- * Lifecycle:
- *   - Started as a foreground service by [AURAForegroundService]
- *   - Stopped when user disables AURA or device runs low on battery
+ * Start it with the intents built by the companion helpers:
+ *  - [startWake]  — turn on always-listening (persisted)
+ *  - [listenNow]  — one command right now (in-app mic button, floating bubble)
+ *  - [turnOff]    — stop listening and remove the notification
  */
 @AndroidEntryPoint
 class WakeWordService : Service() {
 
     @Inject lateinit var voiceManager: VoiceManager
+    @Inject lateinit var taskManager: TaskManager
+    @Inject lateinit var overlay: AssistantOverlay
+
+    private enum class Mode { IDLE, WAKE, COMMAND, TASK }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var recognizer: SpeechRecognizer? = null
-    private var isRunning = false
+    private var mode = Mode.IDLE
+    private var wakeEnabled = false
+
+    private var wakeRecognizer: SpeechRecognizer? = null
+    private var wakeHeardInPartial = false
+    private var restartJob: Job? = null
+    private var flowJob: Job? = null
+    private var hideJob: Job? = null
+    private var errorStreak = 0
+
+    /** Last task state handled (identity), so duplicates are ignored. */
+    private var lastHandledState: TaskState? = null
+    private var tone: ToneGenerator? = null
+    private var started = false
 
     // ──────────────────────────────────────────────────────────────
     // Lifecycle
@@ -69,159 +97,380 @@ class WakeWordService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification())
-        Log.i(TAG, "WakeWordService created")
+        try {
+            ServiceCompat.startForeground(
+                this, NOTIF_ID, buildNotification("Say \"Hey AURA\" to activate"),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
+            )
+        } catch (e: Exception) {
+            // e.g. Android 14 refuses a microphone service started from the background
+            Log.e(TAG, "Cannot start foreground: ${e.message}")
+            stopSelf()
+            return
+        }
+        started = true
+        wakeEnabled = isWakeEnabled(this)
+        tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 60) } catch (_: Exception) { null }
+
+        // Follow the task the assistant started, to drive the popup.
+        scope.launch {
+            taskManager.state.collect { onTaskState(it) }
+        }
+        Log.i(TAG, "Assistant service created (wake word ${if (wakeEnabled) "on" else "off"})")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!isRunning) {
-            isRunning = true
-            startListeningLoop()
+        if (!started) return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_LISTEN_NOW -> startCommandCapture()
+            ACTION_STOP_TASK -> taskManager.emergencyStop()
+            ACTION_TURN_OFF -> {
+                setWakeEnabled(this, false)
+                wakeEnabled = false
+                if (mode == Mode.WAKE || mode == Mode.IDLE) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+            }
+            else -> { // ACTION_START_WAKE, or a sticky restart (null intent)
+                wakeEnabled = isWakeEnabled(this)
+                if (!wakeEnabled) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                if (mode == Mode.IDLE) startWake()
+            }
         }
-        return START_STICKY // restart automatically if killed
+        return if (wakeEnabled) START_STICKY else START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        isRunning = false
-        stopListening()
+        mode = Mode.IDLE
+        flowJob?.cancel()
+        hideJob?.cancel()
+        destroyWakeRecognizer()
+        overlay.hide()
+        tone?.release()
         scope.cancel()
-        Log.i(TAG, "WakeWordService destroyed")
+        Log.i(TAG, "Assistant service destroyed")
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     // ──────────────────────────────────────────────────────────────
-    // Listening loop
+    // Wake-word listening
     // ──────────────────────────────────────────────────────────────
 
-    /**
-     * Runs a continuous listen-restart loop.
-     * SpeechRecognizer times out after ~5s of silence and must be restarted.
-     */
-    private fun startListeningLoop() {
-        scope.launch {
-            while (isRunning) {
-                startListening()
-                delay(RESTART_DELAY_MS) // tiny gap before restarting
-            }
-        }
-    }
-
-    private fun startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.w(TAG, "SpeechRecognizer not available on this device")
+    private fun startWake() {
+        restartJob?.cancel()
+        if (!wakeEnabled) {
+            mode = Mode.IDLE
             return
         }
-
-        stopListening()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        recognizer?.setRecognitionListener(wakeWordListener)
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        if (mode != Mode.TASK) mode = Mode.WAKE
+        if (!hasMicPermission()) {
+            Log.w(TAG, "No microphone permission")
+            updateNotification("Microphone permission needed — open AURA to allow it")
+            return
         }
-
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.w(TAG, "SpeechRecognizer not available")
+            updateNotification("No speech recognition on this phone — install or enable the Google app")
+            return
+        }
+        wakeHeardInPartial = false
+        val recognizer = wakeRecognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also {
+            it.setRecognitionListener(wakeListener)
+            wakeRecognizer = it
+        }
         try {
-            recognizer?.startListening(intent)
-            Log.d(TAG, "👂 Listening for wake word...")
+            recognizer.startListening(recognizerIntent(partial = true))
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start listening: ${e.message}")
+            Log.e(TAG, "startListening failed: ${e.message}")
+            destroyWakeRecognizer()
+            scheduleWake(2000)
         }
     }
 
-    private fun stopListening() {
-        try {
-            recognizer?.stopListening()
-            recognizer?.destroy()
-        } catch (_: Exception) { }
-        recognizer = null
+    /** True when a "Hey AURA" should start a new command (idle, or a finished task's popup). */
+    private fun listeningForWake(): Boolean =
+        mode == Mode.WAKE || (mode == Mode.TASK && !taskManager.isBusy)
+
+    private fun scheduleWake(delayMs: Long) {
+        restartJob?.cancel()
+        restartJob = scope.launch {
+            delay(delayMs)
+            if (mode == Mode.WAKE || mode == Mode.TASK) startWake()
+        }
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Recognition listener
-    // ──────────────────────────────────────────────────────────────
+    private fun destroyWakeRecognizer() {
+        restartJob?.cancel()
+        try {
+            wakeRecognizer?.cancel()
+            wakeRecognizer?.destroy()
+        } catch (_: Exception) { }
+        wakeRecognizer = null
+    }
 
-    private val wakeWordListener = object : RecognitionListener {
-        override fun onPartialResults(partialResults: android.os.Bundle?) {
-            val partial = partialResults
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                ?.lowercase(Locale.getDefault())
-                ?: return
-            if (WAKE_WORDS.any { partial.contains(it) }) {
-                Log.i(TAG, "🔔 Wake word detected (partial): \"$partial\"")
-                onWakeWord()
+    private val wakeListener = object : RecognitionListener {
+        override fun onPartialResults(partialResults: Bundle?) {
+            if (!listeningForWake()) return
+            val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+            if (!wakeHeardInPartial && texts.any { extractCommand(it) != null }) {
+                wakeHeardInPartial = true
+                // Pop up right away; the final result decides what to do next.
+                beep()
+                overlay.show("Listening…")
             }
         }
 
-        override fun onResults(results: android.os.Bundle?) {
-            val text = results
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                ?.lowercase(Locale.getDefault())
-                ?: return
+        override fun onResults(results: Bundle?) {
+            errorStreak = 0
+            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+            Log.d(TAG, "Heard: $texts")
 
-            Log.d(TAG, "Result: \"$text\"")
+            if (mode == Mode.TASK && taskManager.isBusy) {
+                // While a task runs only "Hey AURA, stop" (or a bare "stop") matters.
+                val wantsStop = texts.any { t ->
+                    val c = extractCommand(t)
+                    (c != null && STOP_REGEX.matches(c)) || t.trim().lowercase(Locale.ROOT) in BARE_STOP
+                }
+                if (wantsStop) taskManager.emergencyStop()
+                scheduleWake(RESTART_MS)
+                return
+            }
+            if (!listeningForWake()) return
 
+            val command = texts.firstNotNullOfOrNull { extractCommand(it) }
+            if (command == null) {
+                if (wakeHeardInPartial) startCommandCapture(alreadyBeeped = true)
+                else scheduleWake(RESTART_MS)
+                return
+            }
             when {
-                STOP_WORDS.any { text.contains(it) } -> {
-                    Log.i(TAG, "🛑 Stop command detected: \"$text\"")
-                    broadcastStop()
-                }
-                WAKE_WORDS.any { text.contains(it) } -> {
-                    Log.i(TAG, "🔔 Wake word detected: \"$text\"")
-                    onWakeWord()
-                }
+                command.isBlank() -> startCommandCapture(alreadyBeeped = wakeHeardInPartial)
+                STOP_REGEX.matches(command) -> { overlay.hide(); scheduleWake(RESTART_MS) }
+                else -> runCommand(command)
             }
         }
 
         override fun onError(error: Int) {
-            // ERROR_NO_MATCH and ERROR_SPEECH_TIMEOUT are normal — just restart
-            Log.d(TAG, "STT error $error — will restart loop")
+            if (listeningForWake() && wakeHeardInPartial) {
+                // Heard "Hey AURA" but the session ended — ask for the command.
+                startCommandCapture(alreadyBeeped = true)
+                return
+            }
+            if (mode != Mode.WAKE && mode != Mode.TASK) return
+            val delayMs = when (error) {
+                SpeechRecognizer.ERROR_NO_MATCH,
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> RESTART_MS
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                    updateNotification("Microphone permission needed — open AURA to allow it")
+                    return
+                }
+                else -> {
+                    // Busy / client / network / server / too many requests: back off.
+                    errorStreak++
+                    destroyWakeRecognizer()
+                    (1000L * errorStreak).coerceAtMost(10_000L)
+                }
+            }
+            Log.d(TAG, "Wake session ended (error $error), restarting in ${delayMs}ms")
+            scheduleWake(delayMs)
         }
 
-        override fun onReadyForSpeech(params: android.os.Bundle?) {}
+        override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
-        override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Wake + Stop actions
+    // Command capture → task
     // ──────────────────────────────────────────────────────────────
 
-    private fun onWakeWord() {
-        stopListening() // stop the loop while processing command
-        voiceManager.speak("Yes?")
-        broadcastWakeWord()
-        // Resume loop after brief delay (voice manager will restart when HomeViewModel is done)
-        scope.launch {
-            delay(500)
-            if (isRunning) startListeningLoop()
+    /** Pop up, beep and listen for one command. */
+    private fun startCommandCapture(alreadyBeeped: Boolean = false) {
+        if (taskManager.isBusy && mode == Mode.TASK) {
+            overlay.show("I'm still working on the last task", "Say \"Hey AURA, stop\" to cancel it.")
+            return
+        }
+        mode = Mode.COMMAND
+        destroyWakeRecognizer()
+        hideJob?.cancel()
+        flowJob?.cancel()
+        flowJob = scope.launch {
+            if (!hasMicPermission()) {
+                showThenResume("I need microphone permission", "Open AURA and allow the microphone.")
+                return@launch
+            }
+            overlay.show("Listening…", "Say what you want me to do.", actionsClose())
+            if (!alreadyBeeped) beep()
+            delay(350) // let the wake recognizer release the mic
+
+            val text = voiceManager.recognizeSpeech()?.trim()
+            val command = text?.let { extractCommand(it) ?: it }?.trim()
+            if (command.isNullOrBlank()) {
+                overlay.show("Sorry, I didn't catch that", null,
+                    AssistantOverlay.Actions(onTalk = { startCommandCapture() }, onClose = { closePanel() }))
+                scheduleClose(5000)
+                return@launch
+            }
+            runCommand(command)
         }
     }
 
-    private fun broadcastWakeWord() {
-        val intent = Intent(ACTION_WAKE_WORD_DETECTED).apply {
-            setPackage(packageName)
-        }
-        sendBroadcast(intent)
-        Log.i(TAG, "📡 Broadcast: ACTION_WAKE_WORD_DETECTED")
+    private fun runCommand(command: String) {
+        Log.i(TAG, "Command: \"$command\"")
+        mode = Mode.TASK
+        destroyWakeRecognizer()
+        hideJob?.cancel()
+        overlay.show("“$command”", "Working on it…", AssistantOverlay.Actions(onClose = { closePanel() }))
+        lastHandledState = null
+        taskManager.reset()
+        taskManager.execute(command)
+        // execute() can fail synchronously (e.g. setup problem) — handle that now.
+        onTaskState(taskManager.state.value)
+        // Keep listening in the background so "Hey AURA, stop" works mid-task.
+        scheduleWake(1500)
     }
 
-    private fun broadcastStop() {
-        val intent = Intent(ACTION_STOP_COMMAND).apply {
-            setPackage(packageName)
+    // ──────────────────────────────────────────────────────────────
+    // Task state → popup
+    // ──────────────────────────────────────────────────────────────
+
+    private fun onTaskState(state: TaskState) {
+        if (mode != Mode.TASK || state === lastHandledState) return
+        lastHandledState = state
+        when (state) {
+            is TaskState.Planning -> overlay.show("Thinking…", null, AssistantOverlay.Actions(onClose = { closePanel() }))
+            is TaskState.Executing -> overlay.showWorking(
+                "Step ${state.stepIndex + 1} of ${state.totalSteps}",
+                describe(state.currentStep.action, state.currentStep.text ?: state.currentStep.pkg)
+            )
+            is TaskState.WaitingForUser -> askApproval(state)
+            is TaskState.Completed -> finishTask("Done", null, 2500)
+            is TaskState.Failed -> finishTask("Couldn't finish", state.reason, 7000)
+            is TaskState.Cancelled -> finishTask("Stopped", null, 1500)
+            else -> {}
         }
-        sendBroadcast(intent)
-        voiceManager.speak("Stopping.")
-        Log.i(TAG, "📡 Broadcast: ACTION_STOP_COMMAND")
+    }
+
+    private fun askApproval(state: TaskState.WaitingForUser) {
+        val message = state.riskAction.message ?: "Allow this ${state.riskAction.action.replace('_', ' ')}?"
+        val body = listOfNotNull(message, state.anomalyWarning?.let { "⚠ $it" }).joinToString("\n")
+
+        if (state.riskLevel == RiskLevel.CRITICAL) {
+            // Needs fingerprint/face — only possible inside AURA's screen.
+            overlay.show("Confirm with fingerprint", body, AssistantOverlay.Actions(
+                onDeny = { state.onDeny() },
+                onOpenApp = { openApp() }
+            ))
+            return
+        }
+
+        overlay.show("Allow this?", "$body\n\nSay \"yes\" or \"no\".", AssistantOverlay.Actions(
+            onDeny = { state.onDeny() },
+            onAllow = { scope.launch { state.onAllow() } }
+        ))
+        // Also accept a spoken yes/no.
+        destroyWakeRecognizer()
+        flowJob?.cancel()
+        flowJob = scope.launch {
+            waitForSpeechToFinish()
+            val answer = voiceManager.recognizeSpeech()?.lowercase(Locale.ROOT).orEmpty()
+            if (taskManager.state.value !== state) return@launch // already answered by tap
+            when {
+                NO_WORDS.any { Regex("\\b$it\\b").containsMatchIn(answer) } -> state.onDeny()
+                YES_WORDS.any { Regex("\\b$it\\b").containsMatchIn(answer) } -> state.onAllow()
+                else -> { /* unclear — leave the buttons up */ }
+            }
+            scheduleWake(800)
+        }
+    }
+
+    private fun finishTask(title: String, body: String?, showMs: Long) {
+        flowJob?.cancel()
+        overlay.show(title, body, AssistantOverlay.Actions(
+            onTalk = { startCommandCapture() },
+            onClose = { closePanel() }
+        ))
+        scheduleClose(showMs)
+    }
+
+    private fun scheduleClose(afterMs: Long) {
+        hideJob?.cancel()
+        hideJob = scope.launch {
+            delay(afterMs)
+            closePanel()
+        }
+    }
+
+    /** Hide the popup and go back to waiting for "Hey AURA" (or stop if it's off). */
+    private fun closePanel() {
+        hideJob?.cancel()
+        flowJob?.cancel()
+        overlay.hide()
+        if (taskManager.isBusy) return // task still running; keep TASK mode
+        lastHandledState = null
+        destroyWakeRecognizer() // a fresh session avoids "recognizer busy"
+        if (wakeEnabled) {
+            mode = Mode.WAKE
+            scheduleWake(400)
+        } else {
+            mode = Mode.IDLE
+            stopSelf()
+        }
+    }
+
+    private fun showThenResume(title: String, body: String) {
+        overlay.show(title, body, actionsClose())
+        scheduleClose(5000)
+    }
+
+    private fun actionsClose() = AssistantOverlay.Actions(onClose = { closePanel() })
+
+    // ──────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────
+
+    private suspend fun waitForSpeechToFinish() {
+        delay(300)
+        var waited = 0
+        while (voiceManager.isSpeaking.value && waited < 8000) {
+            delay(200); waited += 200
+        }
+    }
+
+    private fun recognizerIntent(partial: Boolean) =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, partial)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+    private fun beep() {
+        try { tone?.startTone(ToneGenerator.TONE_PROP_ACK, 150) } catch (_: Exception) { }
+    }
+
+    private fun hasMicPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun openApp() {
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    private fun describe(action: String, target: String?): String {
+        val verb = action.replace('_', ' ').replaceFirstChar { it.uppercase() }
+        return if (target.isNullOrBlank()) verb else "$verb: $target"
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -231,44 +480,104 @@ class WakeWordService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "AURA Wake Word Listener",
+            "AURA Assistant",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Listens for 'Hey AURA' in the background"
+            description = "Listens for \"Hey AURA\""
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
-        val tapIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
+    private fun buildNotification(text: String): Notification {
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val talk = PendingIntent.getService(
+            this, 1, listenNowIntent(this), PendingIntent.FLAG_IMMUTABLE
+        )
+        val off = PendingIntent.getService(
+            this, 2, Intent(this, WakeWordService::class.java).setAction(ACTION_TURN_OFF),
             PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AURA Listening")
-            .setContentText("Say \"Hey AURA\" to activate")
+            .setContentTitle("AURA is ready")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(tapIntent)
+            .setContentIntent(open)
+            .addAction(0, "Talk", talk)
+            .addAction(0, "Turn off", off)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
+    private fun updateNotification(text: String) {
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(text))
+    }
+
     companion object {
-        const val ACTION_WAKE_WORD_DETECTED = "com.aura.WAKE_WORD_DETECTED"
-        const val ACTION_STOP_COMMAND       = "com.aura.STOP_COMMAND"
+        const val ACTION_START_WAKE = "com.aura.assistant.START_WAKE"
+        const val ACTION_LISTEN_NOW = "com.aura.assistant.LISTEN_NOW"
+        const val ACTION_STOP_TASK  = "com.aura.assistant.STOP_TASK"
+        const val ACTION_TURN_OFF   = "com.aura.assistant.TURN_OFF"
 
-        /** Words that activate AURA */
-        private val WAKE_WORDS = setOf("hey aura", "hi aura", "okay aura", "aura")
+        private const val RESTART_MS = 250L
 
-        /** Voice emergency stop commands */
-        private val STOP_WORDS = setOf("hey aura stop", "aura stop", "stop aura", "emergency stop")
+        /** "hey aura", "ok aura", "hi ora", … (speech engines often mishear "aura"). */
+        private val WAKE_REGEX = Regex(
+            "\\b(hey|hi|hay|ok|okay|hello)[\\s,]+(aura|ora|aurah|oura|orra|aara|aira|aurora)\\b",
+            RegexOption.IGNORE_CASE
+        )
+        /** Utterance that starts with the name: "Aura, open YouTube". */
+        private val NAME_FIRST_REGEX = Regex("^\\s*(aura|aurah|oura)\\b", RegexOption.IGNORE_CASE)
+        private val STOP_REGEX = Regex("^\\s*(stop|cancel|abort)\\b.*", RegexOption.IGNORE_CASE)
+        private val BARE_STOP = setOf("stop", "cancel", "aura stop", "stop aura")
 
-        private const val RESTART_DELAY_MS = 300L
+        private val YES_WORDS = listOf("yes", "yeah", "yep", "confirm", "allow", "ok", "okay", "sure", "go ahead", "do it", "haan", "ha")
+        private val NO_WORDS = listOf("no", "nope", "cancel", "deny", "stop", "don't", "dont", "nahi", "mat")
 
-        fun startIntent(context: Context) =
-            Intent(context, WakeWordService::class.java)
+        /**
+         * If [text] contains the wake phrase, returns what was said after it
+         * ("" if nothing). Returns null if there's no wake phrase.
+         */
+        fun extractCommand(text: String): String? {
+            val match = WAKE_REGEX.find(text) ?: NAME_FIRST_REGEX.find(text) ?: return null
+            return text.substring(match.range.last + 1).trim(' ', ',', '.', '!', '?', ':')
+        }
+
+        fun isWakeEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_WAKE_ENABLED, false)
+
+        fun setWakeEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(PREF_WAKE_ENABLED, enabled).apply()
+        }
+
+        fun listenNowIntent(context: Context) =
+            Intent(context, WakeWordService::class.java).setAction(ACTION_LISTEN_NOW)
+
+        /** Turn on always-listening for "Hey AURA". Call while AURA is in the foreground. */
+        fun startWake(context: Context): Boolean {
+            setWakeEnabled(context, true)
+            return start(context, Intent(context, WakeWordService::class.java).setAction(ACTION_START_WAKE))
+        }
+
+        /** Listen for one command now (mic button / bubble). Call while AURA is in the foreground. */
+        fun listenNow(context: Context): Boolean = start(context, listenNowIntent(context))
+
+        /** Turn off always-listening. */
+        fun turnOff(context: Context) {
+            setWakeEnabled(context, false)
+            context.stopService(Intent(context, WakeWordService::class.java))
+        }
+
+        private fun start(context: Context, intent: Intent): Boolean = try {
+            ContextCompat.startForegroundService(context, intent)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Couldn't start assistant service: ${e.message}")
+            false
+        }
     }
 }

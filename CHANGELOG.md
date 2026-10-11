@@ -7,6 +7,21 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Fixed — voice assistant and tasks
+- Voice never worked on Android 11+: added `<queries>` so the speech recognizer (and other apps for `open_app`) are visible
+- Wake-word loop restarted the mic every 0.3 s, so "Hey AURA" could never be heard; now restarts only when a session ends
+- The Groq key typed in Settings was ignored (only the empty build-time key was sent); keys now come from `ApiKeyStore`
+- All three Groq models AURA used were retired by Groq; switched to gpt-oss-120b → gpt-oss-20b → qwen3.8-27b, and Gemini fallback to gemini-2.5-flash (it was never called before)
+- Planner prompt asked for an array in JSON-object mode and never named the step fields; now one shared prompt with the exact keys
+- Failed steps were reported as "Task completed"; tasks now stop at the first failed step and say why
+- Skills were saved before running (failed plans got cached); now saved only after success, and failing stored skills are re-planned
+- Removed the keep-alive service that requested a microphone foreground service from the background (crashes on Android 14+)
+
+### Added
+- Google-Assistant-style popup over any app: "Hey AURA" → listen → run → Allow/Deny (tap or say yes/no) → result
+- "Hey AURA, open YouTube" in one sentence; "Hey AURA, stop" cancels a running task
+- Gemini key field in Settings; clear spoken messages when Accessibility is off or no key is set
+
 ### Changed
 - Repo layout: design, plan and research docs moved into `docs/`; AGENTS.md slimmed to an index with per-package `package.md` files
 - README corrected to match the code (no Python backend; real LLM models, actions, permissions; feature status column)
