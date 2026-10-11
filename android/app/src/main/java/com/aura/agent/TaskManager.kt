@@ -27,6 +27,9 @@ import com.aura.voice.VoiceManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -95,10 +98,17 @@ class TaskManager @Inject constructor(
     /** True while a task is planning, running or waiting for approval. */
     val isBusy: Boolean
         get() = when (_state.value) {
-            is TaskState.Planning, is TaskState.Executing,
+            is TaskState.Planning, is TaskState.Executing, is TaskState.WaitingForUnlock,
             is TaskState.WaitingForUser, is TaskState.Verifying -> true
             else -> false
         }
+
+    /**
+     * The last task that finished with "Done", so the user can say it was wrong.
+     * [storedSkillId] = stored skill that ran as-is; [learned] = skill being saved from this run.
+     */
+    private class LastRun(val goal: String, val storedSkillId: String?, val learned: Deferred<String?>?)
+    @Volatile private var lastRun: LastRun? = null
 
     /** Outcome of running a list of steps. */
     private sealed class RunOutcome {
@@ -142,6 +152,7 @@ class TaskManager @Inject constructor(
         }
 
         stopCurrentTask()
+        lastRun = null
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
         currentJob = scope.launch { runTask(taskId, sanitized) }
@@ -159,6 +170,7 @@ class TaskManager @Inject constructor(
             return
         }
         stopCurrentTask()
+        lastRun = null
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
         currentJob = scope.launch { runSteps(taskId, label, steps) }
@@ -191,6 +203,25 @@ class TaskManager @Inject constructor(
     fun pause() {
         Log.w(TAG, "⏸ Task paused (system interrupt)")
         stopCurrentTask()
+    }
+
+    /**
+     * The user says the last "Done" task did the wrong thing. The skill that produced it
+     * is dropped (a skill learned on this phone is deleted; a built-in or downloaded one is
+     * switched off), so the same mistake isn't repeated. Returns false if there's nothing to undo.
+     */
+    fun reportWrong(): Boolean {
+        val run = lastRun ?: return false
+        lastRun = null
+        scope.launch {
+            val learnedId = try { run.learned?.await() } catch (_: Exception) { null }
+            listOfNotNull(learnedId, run.storedSkillId).distinct().forEach { id ->
+                skillUpdater.markWrong(id, run.goal)
+            }
+            memoryManager.remember(run.goal, "failure", "unknown")
+        }
+        Log.w(TAG, "User reported a wrong result for \"${run.goal}\"")
+        return true
     }
 
     /** Reset state to Created (ready for next command). */
@@ -270,16 +301,17 @@ class TaskManager @Inject constructor(
             // 3. Run, recovering from failed steps by re-planning from the current screen.
             when (val result = runWithRecovery(taskId, goal, firstSteps, runParams)) {
                 is FlowResult.Done -> {
-                    finishSuccess(taskId, goal, result.executed)
                     if (match != null && !result.recovered) {
+                        lastRun = LastRun(goal, match.skill.skillId, null)
                         scope.launch { skillUpdater.recordSuccess(match.skill.skillId) }
                     } else {
                         // New plan, or a stored skill that needed fixing: save the path that
                         // actually worked as this phone's variant (values → {slots}).
                         if (match != null) scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
                         val template = SkillMatcher.templatize(result.executed, runParams)
-                        scope.launch { skillLearner.learn(goal, plan, template) }
+                        lastRun = LastRun(goal, null, scope.async { skillLearner.learn(goal, plan, template) })
                     }
+                    finishSuccess(taskId, goal, result.executed)
                 }
                 is FlowResult.Failed -> {
                     if (match != null) scope.launch { skillUpdater.handleFailure(match.skill.skillId, goal) }
@@ -436,7 +468,10 @@ class TaskManager @Inject constructor(
         try {
             Log.i(TAG, "Direct execution [$taskId]: $label (${steps.size} steps)")
             when (val outcome = runStepsInternal(taskId, label, steps)) {
-                RunOutcome.Success -> finishSuccess(taskId, label, steps)
+                RunOutcome.Success -> {
+                    lastRun = LastRun(label, null, null)
+                    finishSuccess(taskId, label, steps)
+                }
                 is RunOutcome.StepFailed -> fail(taskId, label, outcome.reason)
                 RunOutcome.Stopped -> {}
             }
@@ -504,7 +539,15 @@ class TaskManager @Inject constructor(
             _state.value = if (step.action == ActionStep.VERIFY) TaskState.Verifying
                 else TaskState.Executing(step, index, steps.size)
             if (step.action != ActionStep.VERIFY) voiceManager.narrateStep(step)
-            val result = actionExecutor.execute(step)
+            var result = actionExecutor.execute(step)
+            // The app (or phone) is asking for its lock: wait for the user, then try again.
+            var unlockWaits = 0
+            while (!result.ok && unlockWaits < MAX_UNLOCK_WAITS && actionExecutor.lockScreenInFront()) {
+                unlockWaits++
+                if (!waitForUnlock(taskId, goal, primaryApp)) return RunOutcome.Stopped
+                _state.value = TaskState.Executing(step, index, steps.size)
+                result = actionExecutor.execute(step)
+            }
             if (!result.ok) {
                 return RunOutcome.StepFailed(result.error ?: "A step didn't work.", index)
             }
@@ -514,6 +557,28 @@ class TaskManager @Inject constructor(
             }
         }
         return RunOutcome.Success
+    }
+
+    /**
+     * Show "Unlock the app" and wait (up to [UNLOCK_TIMEOUT_MS]) until no lock screen is in
+     * front. AURA never types PINs or passwords itself. Returns false (task failed) on timeout.
+     */
+    private suspend fun waitForUnlock(taskId: String, goal: String, primaryApp: String): Boolean {
+        val appName = primaryApp.takeIf { it != "unknown" }?.substringAfterLast('.')
+            ?.replaceFirstChar { it.uppercase() }
+        Log.i(TAG, "Lock screen in front — waiting for the user to unlock")
+        _state.value = TaskState.WaitingForUnlock(appName)
+        voiceManager.speak("Please unlock ${appName ?: "the app"}. I'll continue after that.")
+        val deadline = System.currentTimeMillis() + UNLOCK_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            delay(UNLOCK_POLL_MS)
+            if (!actionExecutor.lockScreenInFront()) {
+                delay(UNLOCK_SETTLE_MS) // the app's own screen is still appearing
+                return true
+            }
+        }
+        fail(taskId, goal, "${appName ?: "The app"} stayed locked, so I stopped. Unlock it and ask me again.")
+        return false
     }
 
     /** Announce and record a finished task. */
@@ -587,6 +652,11 @@ class TaskManager @Inject constructor(
     private companion object {
         /** How many times a task may re-plan from the current screen after a failed step. */
         const val MAX_RECOVERIES = 2
+        /** How long AURA waits for the user to unlock an app before giving up. */
+        const val UNLOCK_TIMEOUT_MS = 45_000L
+        const val UNLOCK_POLL_MS = 700L
+        const val UNLOCK_SETTLE_MS = 800L
+        const val MAX_UNLOCK_WAITS = 2
         /** Plans with these finish outside any app screen — no automatic "app in front" check. */
         val NO_AUTO_VERIFY = setOf(
             ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,

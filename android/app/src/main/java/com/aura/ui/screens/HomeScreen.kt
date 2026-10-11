@@ -440,6 +440,7 @@ private fun TaskState.statusText(): String = when (this) {
     is TaskState.Planning       -> "Thinking…"
     is TaskState.Executing      -> "Step ${stepIndex + 1} of $totalSteps: ${currentStep.action}"
     is TaskState.WaitingForUser -> "Waiting for your approval"
+    is TaskState.WaitingForUnlock -> "Unlock the app — I'll continue after that"
     is TaskState.Verifying      -> "Verifying…"
     is TaskState.Completed      -> "✓ $summary"
     is TaskState.Failed         -> "Failed: $reason"

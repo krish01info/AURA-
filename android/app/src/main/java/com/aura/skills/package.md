@@ -27,7 +27,7 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 | SkillCache.kt | L1 RAM: LRU of the ~20 most-used variants (warmed at startup). |
 | SkillDiskCache.kt | L2 disk: one JSON file per variant + keyword index (`filesDir/skill_disk_cache/`). Warmed with the next 200. |
 | SkillHealthMonitor.kt | Success/failure counts; BROKEN (≥2 failures and < 60%) → stale + evicted from RAM/disk. |
-| SkillUpdater.kt | Called by TaskManager after each stored-skill run; DEGRADED → checks cloud for a newer version. |
+| SkillUpdater.kt | Called by TaskManager after each stored-skill run; DEGRADED → checks cloud for a newer version. `markWrong()` (popup "Wrong"): deletes a skill learned on this phone, switches off a built-in/downloaded one. |
 | SkillRepository.kt | Data access for the Skill Store/Dashboard UI (not used for lookup). |
 | SkillSeeder.kt | Built-in skills ("app shortcuts") from `assets/app_shortcuts.json` (or a newer downloaded copy). Each launch: insert missing, refresh changed (counters kept), delete removed. Also `ShortcutFile`/`ShortcutDef`. |
 | AppShortcutsUpdater.kt | Daily `@HiltWorker`: downloads `app_shortcuts.json` from `main` on GitHub; a valid file with a higher `version` is saved to `filesDir` and re-seeded. |

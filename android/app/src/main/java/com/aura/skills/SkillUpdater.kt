@@ -26,6 +26,7 @@ class SkillUpdater @Inject constructor(
     private val localDao: SkillPackDao,
     private val skillHealthMonitor: SkillHealthMonitor,
     private val skillCache: SkillCache,
+    private val diskCache: SkillDiskCache,
     private val cloudApi: SupabaseSkillApi
 ) {
 
@@ -70,6 +71,21 @@ class SkillUpdater @Inject constructor(
         return health
     }
 
+    /**
+     * The user said this skill's result was wrong ("Wrong" in the popup). A skill learned on
+     * this phone is deleted; a built-in or downloaded one is switched off (stale) so it isn't
+     * used again — the next time, the LLM plans fresh and a new variant is learned.
+     * (A built-in comes back on when app_shortcuts.json changes that entry.)
+     */
+    suspend fun markWrong(skillId: String, goal: String) {
+        val skill = localDao.getSkill(skillId) ?: return
+        if (skill.createdBy == LOCAL) localDao.delete(skillId) else localDao.markStale(skillId)
+        skillCache.invalidate(skillId)
+        diskCache.remove(skillId)
+        Log.w(TAG, "👎 Skill $skillId marked wrong by the user (goal: $goal) — " +
+            if (skill.createdBy == LOCAL) "deleted" else "switched off")
+    }
+
     // ── Cloud update check ────────────────────────────────────────
     private suspend fun checkForCloudUpdate(skillId: String) {
         val local = localDao.getSkill(skillId) ?: return
@@ -81,5 +97,9 @@ class SkillUpdater @Inject constructor(
         } else {
             Log.d(TAG, "No cloud update for $skillId (already at latest)")
         }
+    }
+
+    private companion object {
+        const val LOCAL = "local"
     }
 }

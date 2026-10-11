@@ -2,6 +2,7 @@ package com.aura.agent
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.Manifest
@@ -75,6 +76,53 @@ class ActionExecutor @Inject constructor(
     val boundService: AccessibilityService? get() = service
 
     fun getUiSnapshot(): String = uiObserver.getTextSnapshot()
+
+    /**
+     * Called with true right before AURA performs a gesture and false after, so the
+     * assistant banner can let the touch through instead of catching it.
+     */
+    @Volatile var gestureListener: ((Boolean) -> Unit)? = null
+
+    private suspend fun <T> touchThrough(block: suspend () -> T): T {
+        val listener = gestureListener ?: return block()
+        listener(true)
+        delay(TOUCH_THROUGH_SETTLE_MS) // let the banner's window flags update
+        try { return block() } finally { listener(false) }
+    }
+
+    /**
+     * True when the phone is locked or an app lock (fingerprint / PIN / pattern prompt)
+     * is on screen. Looks at every window, because the fingerprint prompt is often a
+     * system window above the app. AURA's own windows are skipped.
+     */
+    fun lockScreenInFront(): Boolean {
+        val km = appContext.getSystemService(KeyguardManager::class.java)
+        if (km?.isKeyguardLocked == true) return true
+        val svc = service ?: return false
+        val roots = try { svc.windows.mapNotNull { it.root } } catch (_: Exception) { emptyList() }
+            .ifEmpty { listOfNotNull(svc.rootInActiveWindow) }
+        for (root in roots) {
+            val pkg = root.packageName?.toString()
+            if (pkg == appContext.packageName) continue // our own popup says "Unlock the app"
+            if (pkg in LockDetector.LOCK_PACKAGES) return true
+            if (LockDetector.looksLocked(collectText(root))) return true
+        }
+        return false
+    }
+
+    private fun collectText(root: AccessibilityNodeInfo): String {
+        val out = StringBuilder()
+        var visited = 0
+        fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 30 || visited > 400) return
+            visited++
+            node.text?.let { out.append(it).append('\n') }
+            node.contentDescription?.let { out.append(it).append('\n') }
+            for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)
+        }
+        walk(root, 0)
+        return out.toString()
+    }
 
     // ──────────────────────────────────────────────────────────────
     // Dispatch
@@ -260,8 +308,9 @@ class ActionExecutor @Inject constructor(
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
             .build()
-        val sent = svc.dispatchGesture(gesture, null, null)
-        delay(400L)
+        val sent = touchThrough {
+            svc.dispatchGesture(gesture, null, null).also { delay(400L) }
+        }
         return if (sent) StepResult.OK else StepResult.fail("The swipe gesture was blocked.")
     }
 
@@ -345,9 +394,9 @@ class ActionExecutor @Inject constructor(
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, 60))
             .build()
-        val sent = svc.dispatchGesture(gesture, null, null)
-        delay(200L)
-        return sent
+        return touchThrough {
+            svc.dispatchGesture(gesture, null, null).also { delay(200L) }
+        }
     }
 
     private fun noService(): StepResult {
@@ -607,6 +656,7 @@ class ActionExecutor @Inject constructor(
             return action in ALLOWED_INTENT_ACTIONS || action.startsWith("android.settings.")
         }
         const val VERIFY_TIMEOUT_MS = 5000L
+        private const val TOUCH_THROUGH_SETTLE_MS = 80L
         private const val NEEDS_CALL_PERMISSION =
             "I opened the dialer but couldn't press Call. Allow AURA to make phone calls (Settings → Apps → AURA → Permissions)."
         private val CALL_BUTTON_IDS = setOf(
