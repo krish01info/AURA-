@@ -2,6 +2,7 @@ package com.aura.macros
 
 import android.util.Log
 import com.aura.agent.TaskManager
+import com.aura.agent.TaskState
 import com.aura.data.db.MacroDao
 import com.aura.data.model.MacroEntity
 import kotlinx.coroutines.delay
@@ -73,9 +74,16 @@ class MacroRunner @Inject constructor(
 
         for ((i, goal) in goals.withIndex()) {
             Log.i(TAG, "Macro step ${i + 1}/${goals.size}: $goal")
-            taskManager.execute(goal)
-            // Wait for each task to complete before running the next one
-            delay(STEP_DELAY_MS)
+            // Wait for this task to really finish before starting the next one —
+            // starting a new task cancels the running one.
+            val job = taskManager.execute(goal)
+            job?.join()
+            val result = taskManager.state.value
+            if (job == null || result !is TaskState.Completed) {
+                Log.w(TAG, "⛔ Macro ${macro.name} stopped at step ${i + 1}: $result")
+                return
+            }
+            delay(STEP_DELAY_MS) // let the UI settle between tasks
         }
 
         Log.i(TAG, "✅ Macro complete: ${macro.name}")

@@ -111,15 +111,24 @@ Rules:
     fun userMessage(goal: String, uiContext: String, memoryContext: String): String =
         buildString {
             if (memoryContext.isNotBlank()) {
-                append(memoryContext)
+                append(asData(memoryContext))
                 append("\n\n")
             }
             append("Goal: ")
-            append(goal)
+            append(asData(goal))
             append("\n\n[UI_CONTENT_START]\n")
-            append(uiContext.take(2500))
+            append(asData(uiContext).take(2500))
             append("\n[UI_CONTENT_END]")
         }
+
+    /**
+     * Screen text comes from other apps. A chat message containing "[UI_CONTENT_END]"
+     * would otherwise end the data block early and make the rest look like instructions,
+     * so our two markers are removed from anything we didn't write ourselves.
+     * Role tags like "[button]" are untouched.
+     */
+    private val DATA_MARKER = Regex("\\[\\s*UI_CONTENT_(?:START|END)\\s*\\]", RegexOption.IGNORE_CASE)
+    internal fun asData(text: String): String = text.replace(DATA_MARKER, "")
 
     /**
      * Recovery request: some steps already ran, one failed. Ask for ONLY the
@@ -133,7 +142,7 @@ Rules:
         params: Map<String, String>,
         uiContext: String
     ): String = buildString {
-        append("Goal: ").append(goal).append("\n")
+        append("Goal: ").append(asData(goal)).append("\n")
         if (params.isNotEmpty()) {
             append("Params: ").append(params.entries.joinToString(", ") { "${it.key}=\"${it.value}\"" }).append("\n")
         }
@@ -143,7 +152,7 @@ Rules:
         append("This step FAILED: ").append(describe(failed)).append(" — ").append(error).append("\n")
         append("Plan ONLY the remaining steps, starting from the CURRENT screen below. ")
         append("Do not repeat finished steps. Same JSON format; params/patterns describe the whole goal.\n\n")
-        append("[UI_CONTENT_START]\n").append(uiContext.take(2500)).append("\n[UI_CONTENT_END]")
+        append("[UI_CONTENT_START]\n").append(asData(uiContext).take(2500)).append("\n[UI_CONTENT_END]")
     }
 
     /** Short one-line description of a step for prompts and logs. */

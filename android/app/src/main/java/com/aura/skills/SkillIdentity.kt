@@ -65,12 +65,13 @@ object SkillIdentity {
             return "payment" to "check_balance"
         }
 
-        // Messaging intents
+        // Messaging intents — calls first, otherwise "call Mom on WhatsApp" is filed
+        // under send_message just because it mentions WhatsApp.
+        if (CALL_WORDS.containsMatchIn(lower)) {   // whole words: "bring" isn't "ring"
+            return "messaging" to "make_call"
+        }
         if (lower.containsAny("message", "msg", "text", "whatsapp", "chat")) {
             return "messaging" to "send_message"
-        }
-        if (lower.containsAny("call", "ring", "dial")) {
-            return "messaging" to "make_call"
         }
 
         // Food intents
@@ -91,12 +92,12 @@ object SkillIdentity {
             return "media" to "search_play"
         }
 
-        // Email intents
+        // Email intents — compose first, otherwise "send an email" matches "mail" → read_inbox
+        if (lower.containsAny("compose", "send email", "send an email", "write email", "send mail", "reply to")) {
+            return "email" to "compose_send"
+        }
         if (lower.containsAny("gmail", "email", "mail", "inbox")) {
             return "email" to "read_inbox"
-        }
-        if (lower.containsAny("compose", "send email", "write email")) {
-            return "email" to "compose_send"
         }
 
         // Settings intents
@@ -160,6 +161,8 @@ object SkillIdentity {
         val bytes = digest.digest(this.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
     }
+
+    private val CALL_WORDS = Regex("\\b(call|calling|ring|dial)\\b")
 
     private fun String.containsAny(vararg terms: String): Boolean =
         terms.any { this.contains(it) }

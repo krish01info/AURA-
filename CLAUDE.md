@@ -11,7 +11,7 @@ Read it, then only the `package.md` of the package you're changing.
 
 - ✅ CI builds green (first ever on 2026-10-11 after removing a machine-specific `org.gradle.java.home`).
 - ✅ Voice assistant rewritten: `voice/WakeWordService` (flow) + `voice/AssistantOverlay` (popup).
-- ✅ Tasks: Groq gpt-oss cascade → Gemini 2.5 Flash fallback; stop at first failed step.
+- ✅ Tasks: Groq gpt-oss cascade → Gemini 3.8 Flash fallback; stop at first failed step.
 - ✅ Reliability (2026-10-11): mid-task recovery from the current screen (max 2), `verify` steps,
   shortcut actions (dial/sms/alarm/timer/open_link), role-tagged screen snapshot + settle-based waits,
   contact lookup, speech-language setting, "heard: … [Cancel]" popup. Plan: `docs/plans/reliability-plan.md`.
@@ -38,6 +38,10 @@ Read it, then only the `package.md` of the package you're changing.
   `SUPABASE_ANON_KEY` (CI already passes them into the build). Downloads are vetted (`CloudSkillVetting`);
   failed uploads retry at app start.
 - ✅ Room schema 7 committed. CI now commits any newly generated schema JSON to the PR branch itself.
+- ✅ Review fixes (2026-10-15, not phone-tested): fingerprint is really required for CRITICAL steps,
+  permission rules check amount/contact (an unknown amount no longer matches "allow ≤ ₹500"), floating mic tap
+  works, accessibility config reports view ids, update installer opens, Gemini moved to 3.8 Flash
+  (2.5 Flash shuts down 2026-10-16), Groq/Gemini request settings per the providers' docs. See CHANGELOG.
 
 ## Next steps (in priority order)
 
@@ -87,6 +91,11 @@ Read it, then only the `package.md` of the package you're changing.
 - WorkManager is initialized with Hilt's worker factory (`AURAApplication` is a `Configuration.Provider`; the manifest removes the default initializer). New workers: `@HiltWorker` + `@AssistedInject`.
 - `app_shortcuts.json` reaches every phone from `main` without review — keep intents on `ActionExecutor.isAllowedIntent`'s list and risky entries behind `confirm_send`.
 - Never set `org.gradle.java.home` in `android/gradle.properties`.
+- `MainActivity` must stay a `FragmentActivity`: BiometricPrompt needs one, and with a plain ComponentActivity
+  HomeScreen's `as? FragmentActivity` was null, so CRITICAL approvals skipped the fingerprint.
+- Gemini 3: don't set a low temperature (Google: keep the default 1.0); thinking can't be turned off on 3.8 Flash
+  and counts toward `maxOutputTokens`. Groq Qwen in JSON mode needs `reasoning_format` "hidden"/"parsed";
+  gpt-oss rejects `reasoning_format` (use `include_reasoning`).
 - Release builds use R8: a new library may need `-dontwarn`/`-keep` lines in `android/app/proguard-rules.pro`.
   CI builds release on every PR so R8 errors show up there. Reflection-heavy code only fails at run time —
   test a release APK on the phone after adding libraries.

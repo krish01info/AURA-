@@ -412,7 +412,10 @@ private fun AddRuleDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirm(pkg.trim(), action.trim(), selectedPerm, label.trim()) },
-                enabled = true
+                // "Always allow" with no app AND no action would switch off every
+                // confirmation everywhere — require at least one of them.
+                enabled = selectedPerm != AppPermission.ALWAYS_ALLOW ||
+                    pkg.isNotBlank() || action.isNotBlank()
             ) { Text("Add Rule") }
         },
         dismissButton = {

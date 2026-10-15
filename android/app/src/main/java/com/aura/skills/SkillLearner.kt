@@ -128,7 +128,9 @@ class SkillLearner @Inject constructor(
                     successRate = 1.0f,
                     createdBy = "local",
                     lastUsedAt = System.currentTimeMillis(),
-                    description = "Learned from: $goal"
+                    // The template, not the raw request: skills are uploaded to the shared
+                    // cloud table, and "send hi to Rahul" must not leave the phone.
+                    description = "Learned from: ${patterns.first()}"
                 )
             } else {
                 val stepsChanged = existing.steps != stepsJson

@@ -25,15 +25,16 @@ interface PermissionRuleDao {
 
     /**
      * Find rules matching a specific app + action (or wildcards).
-     * Returns rules sorted by priority DESC so the most specific wins.
+     * A rule's intentAction may name a step ("tap") or a whole intent ("send_message"),
+     * so both are matched. Returns rules sorted by priority DESC so the most specific wins.
      */
     @Query("""
         SELECT * FROM permission_rules
         WHERE (appPackage = :appPackage OR appPackage IS NULL)
-          AND (intentAction = :intentAction OR intentAction IS NULL)
+          AND (intentAction = :stepAction OR intentAction = :goalIntent OR intentAction IS NULL)
         ORDER BY priority DESC
     """)
-    suspend fun findRules(appPackage: String, intentAction: String): List<PermissionRule>
+    suspend fun findRules(appPackage: String, stepAction: String, goalIntent: String): List<PermissionRule>
 
     /** Rules for a specific app — used by Permissions UI. */
     @Query("SELECT * FROM permission_rules WHERE appPackage = :appPackage ORDER BY priority DESC")

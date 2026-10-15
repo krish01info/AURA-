@@ -12,7 +12,7 @@
 |---|---|
 | App | AURA — Android AI automation agent (single module `android/app`) |
 | Stack | Kotlin, Jetpack Compose, Hilt, Coroutines + Flow, Room, WorkManager |
-| LLM | Groq (primary, gpt-oss cascade) → Gemini 2.5 Flash (fallback); keys via `llm/ApiKeyStore` |
+| LLM | Groq (primary, gpt-oss cascade) → Gemini 3.8 Flash (fallback); keys via `llm/ApiKeyStore` |
 | Cloud | Supabase (optional; app works fully offline without keys) |
 | SDK | minSdk 29, target/compile 35 |
 | Source root | `android/app/src/main/java/com/aura/` |

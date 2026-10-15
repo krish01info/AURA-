@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 private const val TAG = "UpdateCheckWorker"
 private const val WORK_NAME   = "aura_update_check"
-private const val NOTIF_ID    = 2001
+private const val NOTIF_ID    = 2002  // 2001 is used by WakeWordService
 private const val CHANNEL_ID  = AURAApplication.NOTIFICATION_CHANNEL_UPDATE
 
 /**
@@ -39,12 +39,13 @@ class UpdateCheckWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
     private val updateChecker: UpdateChecker,
-    private val updateManager: UpdateManager
+    private val updateRepository: UpdateRepository
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         Log.i(TAG, "Running update check…")
         val info = updateChecker.checkForUpdate() ?: return Result.retry()
+        updateRepository.setUpdateInfo(info)   // so Home/Settings show the banner
 
         if (info.isUpdateAvailable) {
             Log.i(TAG, "Update available: ${info.latestVersion}")

@@ -56,10 +56,11 @@ class AURAApplication : Application(), Configuration.Provider {
             supabaseAuthManager.ensureSession()
             // Seed initial skills (no-op if already seeded)
             skillSeeder.seedIfEmpty()
+            // Detect Android OS upgrades and mark old skills stale — before the
+            // warm-up, so stale skills aren't loaded into the RAM cache
+            osMigrationHandler.checkForOsMigration()
             // Warm L1 RAM cache with top-20 most-used skills
             skillCache.warmUp()
-            // Detect Android OS upgrades and mark old skills stale
-            osMigrationHandler.checkForOsMigration()
             // Retry uploads of learned skills that didn't reach the cloud before
             skillLearner.uploadPending()
         }

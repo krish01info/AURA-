@@ -48,7 +48,7 @@ class SkillDiskCache @Inject constructor(
     // In-memory keyword index: keyword (lowercase) → set of skillIds
     // Populated lazily on first read and kept in sync on every write.
     private val keywordIndex = mutableMapOf<String, MutableSet<String>>()
-    private var indexLoaded = false
+    @Volatile private var indexLoaded = false
 
     // ─────────────────────────────────────────────────────────────
     // Public API
@@ -60,6 +60,9 @@ class SkillDiskCache @Inject constructor(
      */
     suspend fun put(skill: SkillPackEntity) = withContext(Dispatchers.IO) {
         try {
+            // Must load the saved index first — otherwise persistIndex() below
+            // overwrites the index file with only this one skill.
+            ensureIndexLoaded()
             val file = skillFile(skill.skillId)
             file.writeText(json.encodeToString(skill))
             addToIndex(skill)
@@ -102,6 +105,7 @@ class SkillDiskCache @Inject constructor(
      */
     suspend fun remove(skillId: String) = withContext(Dispatchers.IO) {
         try {
+            ensureIndexLoaded()
             skillFile(skillId).delete()
             removeFromIndex(skillId)
             persistIndex()

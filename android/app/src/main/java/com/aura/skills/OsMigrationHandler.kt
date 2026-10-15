@@ -34,7 +34,8 @@ class OsMigrationHandler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localDao: SkillPackDao,
     private val osFingerprint: OsFingerprint,
-    private val preferences: SharedPreferences
+    private val preferences: SharedPreferences,
+    private val skillCache: SkillCache
 ) {
     suspend fun checkForOsMigration() {
         val savedApiLevel = preferences.getInt(PREF_LAST_API, 0)
@@ -57,12 +58,19 @@ class OsMigrationHandler @Inject constructor(
     private suspend fun handleUpgrade(oldApi: Int, newApi: Int) {
         val oldOsClass = OsFingerprint.osClassTagForApi(oldApi)
 
+        // e.g. Android 14 → 15 are both "android_14_plus" — the skills still fit.
+        if (oldOsClass == osFingerprint.osClassTag) {
+            Log.i(TAG, "OS class unchanged ($oldOsClass) — keeping skills")
+            return
+        }
+
         // Step 1: Mark OS-specific skills for the old Android as stale
         val oldSkills = localDao.getSkillsByOsClass(oldOsClass)
         var stalledCount = 0
         for (skill in oldSkills) {
             if (skill.osClassTag != "universal") {
                 localDao.markStale(skill.skillId)
+                skillCache.invalidate(skill.skillId)   // drop RAM + disk copies too
                 stalledCount++
             }
         }

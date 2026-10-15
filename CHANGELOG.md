@@ -7,6 +7,40 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Fixed — safety
+- CRITICAL steps (payments) now really need fingerprint/face: `MainActivity` is a `FragmentActivity`, so the
+  BiometricPrompt path runs; before, the in-app Allow button approved them without it
+- An "always allow" rule no longer skips the fingerprint check for CRITICAL steps
+- Permission rules with a limit ("allow GPay up to ₹500") or a contact list no longer match when the amount or
+  contact can't be checked; rules can name a whole task ("send_money"), not only a step ("tap")
+- "₹5,000" was read as 5 (payment anomaly check); the average-payment check now parses amounts properly
+- A tap on Send / Pay / Post / Delete… with no confirm_send before it now asks first (the planner's rule is
+  no longer the only guard); after a fingerprint approval inside AURA, the task's app is reopened first
+- Screen text can no longer fake the `[UI_CONTENT_END]` marker to step out of the screen-data block
+- Learned skills uploaded to the cloud no longer carry the raw request ("send hi to Rahul") in `description`
+
+### Fixed — features
+- Floating mic bubble: tapping it did nothing (the tap called `performClick()` with no listener)
+- Accessibility service: reports view ids (`flagReportViewIds`), so tapping by id works; settings link fixed;
+  no longer asks for key-event filtering it never used
+- Update installer never opened on Android 13+ (download-complete receiver must be exported)
+- Update worker shares notification id 2001 with the "Hey AURA" notification; now 2002, and the in-app banner
+  gets the result
+- Macros started the next goal before the previous one finished (cancelling it) and didn't stop on failure
+- Disk skill cache could overwrite its keyword index with a single entry
+- OS upgrade check ran after the RAM cache warm-up (stale skills stayed cached); same-class upgrades
+  (Android 14 → 15) no longer mark skills stale
+- "Call Mom on WhatsApp" was filed as send_message; "send an email" as read_inbox
+- Dashboard: blocked-apps count was always 0; success rate counted running tasks
+- Permissions: an "Always allow" rule with no app and no action (= allow everything) can't be saved
+- Debug test buttons (they message "Rahul") only in debug builds
+
+### Changed — model settings (per Groq / Google docs)
+- Gemini fallback: `gemini-2.5-flash` (shuts down 2026-10-16) → `gemini-3.8-flash`, thinking level "low",
+  default temperature, 8192 output tokens (thinking counts toward the limit)
+- Groq: temperature 0.6 (Groq recommends 0.5–0.7 for reasoning models), `max_completion_tokens` 4096,
+  reasoning text not returned; Qwen gets `reasoning_format: hidden` (required with JSON mode) and top_p 0.95
+
 ## [v0.3.0] - 2026-10-11
 
 First signed release. From now on AURA updates itself from GitHub Releases (Settings shows the update),

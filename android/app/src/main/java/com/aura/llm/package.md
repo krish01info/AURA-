@@ -5,7 +5,7 @@ LLM planning: turn a goal + screen text into a list of `ActionStep`s.
 | File | Role |
 |---|---|
 | GroqClient.kt | Primary. `plan()` for new tasks, `complete(userContent)` for any request (recovery). Model cascade: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` → `qwen/qwen3.8-27b`. Throws `LlmException` with a user-readable message (bad key, rate limit, offline…). |
-| GeminiClient.kt | Fallback (`gemini-2.5-flash`, thinking off, JSON mode). Used by TaskManager when Groq fails or has no key. |
+| GeminiClient.kt | Fallback (`gemini-3.8-flash`, thinking level "low", JSON mode, default temperature). Used by TaskManager when Groq fails or has no key. |
 | PlannerPrompt.kt | Shared system prompt + tolerant parser → `Plan` (steps, intent, params, phrase patterns). One call gives both the steps and everything needed to save them as a skill. |
 | ApiKeyStore.kt | Runtime API keys: Settings value first, `local.properties`/BuildConfig second. Encrypted prefs. |
 

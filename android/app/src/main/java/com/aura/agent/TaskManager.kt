@@ -20,6 +20,7 @@ import com.aura.policy.PermissionDecision
 import com.aura.policy.PolicyEngine
 import com.aura.policy.PromptInjectionDefender
 import com.aura.policy.ValidationResult
+import com.aura.skills.SkillIdentity
 import com.aura.skills.SkillLearner
 import com.aura.skills.SkillMatcher
 import com.aura.skills.SkillUpdater
@@ -132,14 +133,15 @@ class TaskManager @Inject constructor(
 
     /**
      * Start executing a natural-language goal. Cancels any running task first.
+     * @return the task's Job (join it to wait for the result), or null if it didn't start.
      */
-    fun execute(goal: String) {
+    fun execute(goal: String): Job? {
         val sanitized = injectionDefender.sanitize(goal)
         when (val validation = injectionDefender.validateInput(sanitized)) {
             is ValidationResult.Injected -> {
                 _state.value = TaskState.Failed("Rejected: ${validation.reason}")
                 voiceManager.speak("I can't do that — ${validation.reason}")
-                return
+                return null
             }
             ValidationResult.Safe -> { /* continue */ }
         }
@@ -149,14 +151,16 @@ class TaskManager @Inject constructor(
             _state.value = TaskState.Failed(problem)
             voiceManager.speak(problem)
             Log.w(TAG, "Not starting task: $problem")
-            return
+            return null
         }
 
         stopCurrentTask()
         lastRun = null
         val taskId = UUID.randomUUID().toString()
         currentTaskId = taskId
-        currentJob = scope.launch { runTask(taskId, sanitized) }
+        val job = scope.launch { runTask(taskId, sanitized) }
+        currentJob = job
+        return job
     }
 
     /**
@@ -346,7 +350,8 @@ class TaskManager @Inject constructor(
         var current = steps
         var recoveries = 0
         while (true) {
-            when (val outcome = runStepsInternal(taskId, goal, current)) {
+            val confirmedBefore = executed.any { it.action == ActionStep.CONFIRM_SEND }
+            when (val outcome = runStepsInternal(taskId, goal, current, confirmedBefore)) {
                 RunOutcome.Success -> {
                     executed += current
                     return FlowResult.Done(executed, recovered = recoveries > 0)
@@ -497,28 +502,41 @@ class TaskManager @Inject constructor(
     private suspend fun runStepsInternal(
         taskId: String,
         goal: String,
-        steps: List<ActionStep>
+        steps: List<ActionStep>,
+        confirmedBefore: Boolean = false
     ): RunOutcome {
         val primaryApp = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
+        // Permission rules may name a whole intent ("send_money"), not just a step ("tap")
+        val goalIntent = SkillIdentity.inferIntent(goal, primaryApp).second
 
         for ((index, step) in steps.withIndex()) {
             if (_state.value == TaskState.Cancelled) return RunOutcome.Stopped
 
             // ── AppPermissionManager — user rules override PolicyEngine ──
-            val userDecision = permissionManager.evaluate(action = step, appPackage = primaryApp)
+            // The goal lets amount / contact conditions in the user's rules be checked
+            val userDecision = permissionManager.evaluate(
+                action = step, appPackage = primaryApp, goal = goal, goalIntent = goalIntent
+            )
             if (userDecision is PermissionDecision.Deny) {
                 auditLogger.logUserDenied(taskId, step, RiskLevel.HIGH)
                 fail(taskId, goal, userDecision.reason)
                 return RunOutcome.Stopped
             }
 
-            val effectiveRisk = if (userDecision is PermissionDecision.Allow) {
-                RiskLevel.LOW
-            } else {
-                val risk = policyEngine.classify(step)
+            val classified = policyEngine.classify(step)
+            // Safety net: a tap on something like "Send" or "Pay" with no confirm_send
+            // before it (the planner skipped its rule) still asks the user first.
+            val unconfirmedSend = isIrreversibleTap(step) && !confirmedBefore &&
+                steps.subList(0, index).none { it.action == ActionStep.CONFIRM_SEND }
+            val effectiveRisk = when {
+                // An "always allow" rule skips normal confirmations, but never the
+                // fingerprint check for CRITICAL steps (payments).
+                userDecision is PermissionDecision.Allow && classified != RiskLevel.CRITICAL -> RiskLevel.LOW
                 // ALWAYS_CONFIRM rule upgrades LOW/MEDIUM to a confirmation
-                if (userDecision is PermissionDecision.Confirm &&
-                    (risk == RiskLevel.LOW || risk == RiskLevel.MEDIUM)) RiskLevel.HIGH else risk
+                userDecision is PermissionDecision.Confirm &&
+                    (classified == RiskLevel.LOW || classified == RiskLevel.MEDIUM) -> RiskLevel.HIGH
+                unconfirmedSend && classified.ordinal < RiskLevel.HIGH.ordinal -> RiskLevel.HIGH
+                else -> classified
             }
 
             // A call the user didn't ask for (e.g. the AI planned one for "play the song")
@@ -535,14 +553,25 @@ class TaskManager @Inject constructor(
                 val anomaly = anomalyDetector.check(step)
                 val anomalyWarning = (anomaly as? AnomalyResult.Suspicious)?.warningMessage
 
-                voiceManager.announceConfirmation(step, effectiveRisk)
-                val approved = suspendForApproval(step, effectiveRisk, anomalyWarning)
+                // A plain tap has no message of its own — say what will be tapped
+                val shown = if (step.message.isNullOrBlank() && step.action == ActionStep.TAP) {
+                    step.copy(message = "Tap \"${step.text ?: step.viewId?.substringAfter(":id/") ?: "button"}\"?")
+                } else step
+                voiceManager.announceConfirmation(shown, effectiveRisk)
+                val approved = suspendForApproval(shown, effectiveRisk, anomalyWarning)
                 if (!approved) {
                     auditLogger.logUserDenied(taskId, step, effectiveRisk)
                     fail(taskId, goal, "Okay, I won't do that.")
                     return RunOutcome.Stopped
                 }
                 auditLogger.logUserApproved(taskId, step, effectiveRisk)
+                // CRITICAL approvals happen inside AURA's own screen (fingerprint). Go back to
+                // the task's app first, or the next tap/type would act on AURA's screen.
+                if (primaryApp != "unknown" &&
+                    actionExecutor.foregroundPackage() == com.aura.BuildConfig.APPLICATION_ID) {
+                    actionExecutor.openApp(primaryApp, null)
+                    delay(REOPEN_SETTLE_MS)
+                }
             } else {
                 auditLogger.logAutoExecuted(taskId, step, effectiveRisk)
             }
@@ -673,6 +702,14 @@ class TaskManager @Inject constructor(
         Log.e(TAG, "❌ Task [$taskId] failed: $reason")
     }
 
+    /** A tap whose target reads like Send / Pay / Delete … (by text or view id). */
+    private fun isIrreversibleTap(step: ActionStep): Boolean {
+        if (step.action != ActionStep.TAP) return false
+        val target = listOfNotNull(step.text, step.viewId?.substringAfter(":id/")?.replace('_', ' '))
+            .joinToString(" ")
+        return IRREVERSIBLE_WORDS.containsMatchIn(target)
+    }
+
     private fun stopCurrentTask() {
         currentJob?.cancel()
         currentJob = null
@@ -688,6 +725,13 @@ class TaskManager @Inject constructor(
         const val UNLOCK_POLL_MS = 700L
         const val UNLOCK_SETTLE_MS = 800L
         const val MAX_UNLOCK_WAITS = 2
+        /** Time for the task's app to come back to the front after an approval in AURA. */
+        const val REOPEN_SETTLE_MS = 1_200L
+        /** Tap targets that usually can't be undone. */
+        val IRREVERSIBLE_WORDS = Regex(
+            "\\b(send|post|pay|submit|confirm|place order|buy|book|delete|transfer)\\b",
+            RegexOption.IGNORE_CASE
+        )
         /** Plans with these finish outside any app screen — no automatic "app in front" check. */
         val NO_AUTO_VERIFY = setOf(
             ActionStep.DIAL, ActionStep.CALL, ActionStep.SMS, ActionStep.ALARM, ActionStep.TIMER, ActionStep.INTENT,
