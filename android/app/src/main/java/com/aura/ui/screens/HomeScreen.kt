@@ -353,8 +353,10 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                // ── Phase 1 Test Panel (debug) ────────────────────────
-                Phase1TestPanel(viewModel = viewModel)
+                // ── Phase 1 Test Panel (debug builds only — it messages "Rahul") ──
+                if (com.aura.BuildConfig.DEBUG) {
+                    Phase1TestPanel(viewModel = viewModel)
+                }
 
                 Spacer(Modifier.height(16.dp))
             }

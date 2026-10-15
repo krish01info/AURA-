@@ -50,6 +50,13 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
             "openai/gpt-oss-20b"  to "GPT-OSS 20B (fast)",
             "qwen/qwen3.8-27b"    to "Qwen3.8 27B"
         )
+
+        // Request settings from Groq's reasoning-model docs (console.groq.com/docs/reasoning):
+        // temperature 0.5–0.7 avoids repetition loops (0.1 is below that); Qwen also
+        // recommends top_p 0.95 for precise tasks.
+        private const val TEMPERATURE = 0.6f
+        private const val QWEN_TOP_P = 0.95f
+        private const val MAX_COMPLETION_TOKENS = 4096
     }
 
     /**
@@ -76,6 +83,7 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
         for ((modelId, modelName) in cascade) {
             try {
                 Log.i(TAG, "Trying model: $modelName")
+                val isGptOss = modelId.startsWith("openai/gpt-oss")
                 val response = api.chat(
                     ChatRequest(
                         model = modelId,
@@ -83,9 +91,15 @@ class GroqClient @Inject constructor(retrofit: Retrofit) {
                             ChatMessage("system", PlannerPrompt.SYSTEM),
                             ChatMessage("user", userContent)
                         ),
-                        temperature = 0.1f,
+                        temperature = TEMPERATURE,
+                        topP = if (isGptOss) null else QWEN_TOP_P,
+                        maxTokens = MAX_COMPLETION_TOKENS,
                         responseFormat = ResponseFormat("json_object"),
-                        reasoningEffort = if (modelId.startsWith("openai/gpt-oss")) "low" else null
+                        reasoningEffort = "low",
+                        // Only the answer is needed. gpt-oss takes include_reasoning (and rejects
+                        // reasoning_format); Qwen needs reasoning_format "hidden" or "parsed" in JSON mode.
+                        includeReasoning = if (isGptOss) false else null,
+                        reasoningFormat = if (isGptOss) null else "hidden"
                     )
                 )
                 val content = response.choices.firstOrNull()?.message?.content

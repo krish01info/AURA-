@@ -78,7 +78,9 @@ class UpdateManager @Inject constructor(
             context.registerReceiver(
                 receiver,
                 IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-                Context.RECEIVER_NOT_EXPORTED
+                // Must be EXPORTED: DOWNLOAD_COMPLETE is sent by the system's
+                // download provider (another app), so a NOT_EXPORTED receiver never gets it.
+                Context.RECEIVER_EXPORTED
             )
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")

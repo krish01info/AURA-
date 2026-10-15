@@ -202,6 +202,11 @@ class HomeViewModel @Inject constructor(
     fun approveAction() {
         val state = taskState.value
         if (state is TaskState.WaitingForUser) {
+            // CRITICAL steps (payments) only go through approveWithBiometric()
+            if (state.riskLevel == RiskLevel.CRITICAL) {
+                Log.w(TAG, "Refusing to approve a CRITICAL step without fingerprint/face")
+                return
+            }
             viewModelScope.launch { state.onAllow() }
         }
     }

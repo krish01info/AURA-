@@ -62,10 +62,13 @@ class AnomalyDetector @Inject constructor(
      * e.g. step.message = "Send ₹5000 to Rahul?" → extracts 5000.
      */
     private suspend fun checkPaymentAmount(step: ActionStep): AnomalyResult {
-        val requested = extractAmount(step.message ?: step.inputText ?: "") ?: return AnomalyResult.OK
-        val avgAmount = auditLogDao.getAveragePaymentAmount() ?: return AnomalyResult.OK
-
-        if (avgAmount <= 0f) return AnomalyResult.OK
+        val requested = (AmountParser.parse(step.message, allowPlainNumber = true)
+            ?: return AnomalyResult.OK).toFloat()
+        val history = auditLogDao.getRecentApprovedCriticalDetails()
+            .mapNotNull { AmountParser.parse(it)?.toFloat() }
+            .filter { it > 0f }
+        if (history.isEmpty()) return AnomalyResult.OK
+        val avgAmount = history.average().toFloat()
 
         val ratio = requested / avgAmount
         return if (ratio >= ANOMALY_MULTIPLIER) {
@@ -74,16 +77,6 @@ class AnomalyDetector @Inject constructor(
                 "payment of ₹${avgAmount.toInt()}. Please confirm this is correct."
             )
         } else AnomalyResult.OK
-    }
-
-    /**
-     * Extract a numeric rupee amount from a confirmation message.
-     * Matches patterns like: ₹500, Rs.500, 500.00
-     */
-    private fun extractAmount(text: String): Float? {
-        val pattern = Regex("[₹Rs\\.]*([0-9]+(?:\\.[0-9]+)?)")
-        val match = pattern.find(text) ?: return null
-        return match.groupValues[1].toFloatOrNull()
     }
 
     companion object {

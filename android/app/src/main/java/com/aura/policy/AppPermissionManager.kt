@@ -6,7 +6,9 @@ import com.aura.data.db.PermissionRuleDao
 import com.aura.data.model.ActionStep
 import com.aura.data.model.AppPermission
 import com.aura.data.model.PermissionRule
-import org.json.JSONArray
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -51,15 +53,16 @@ class AppPermissionManager @Inject constructor(
      *
      * @param action     The action being attempted
      * @param appPackage The app the action targets
-     * @param contact    Optional: contact name (for messaging/payment rules)
-     * @param amount     Optional: payment amount (for payment rules)
+     * @param goal       The user's request — used to check contact/amount conditions
+     * @param goalIntent Intent of the whole request (e.g. "send_money"), matched against rules
      */
     suspend fun evaluate(
         action: ActionStep,
         appPackage: String,
-        contact: String? = null,
-        amount: Double? = null
+        goal: String = "",
+        goalIntent: String = action.action
     ): PermissionDecision {
+        val amount = AmountParser.parse(action.message) ?: AmountParser.parse(goal)
         // ── Step 1: Blocked apps check ───────────────────────────
         if (blockedAppsDao.isBlocked(appPackage)) {
             val reason = "AURA is blocked from $appPackage. Change in Settings → Permissions."
@@ -69,12 +72,13 @@ class AppPermissionManager @Inject constructor(
 
         // ── Step 2: User permission rules (priority DESC) ────────
         val rules = rulesDao.findRules(
-            appPackage  = appPackage,
-            intentAction = action.action
+            appPackage = appPackage,
+            stepAction = action.action,
+            goalIntent = goalIntent
         )
 
         for (rule in rules) {
-            if (!ruleApplies(rule, contact, amount)) continue
+            if (!ruleApplies(rule, goal, amount)) continue
 
             val decision = when (rule.permission) {
                 AppPermission.ALWAYS_ALLOW   -> PermissionDecision.Allow
@@ -98,18 +102,27 @@ class AppPermissionManager @Inject constructor(
      */
     private fun ruleApplies(
         rule: PermissionRule,
-        contact: String?,
+        goal: String,
         amount: Double?
     ): Boolean {
+        // An ALLOW rule must never fire when we can't verify its condition —
+        // previously an unknown amount/contact made "allow ≤ ₹500" allow everything.
+        val isAllow = rule.permission == AppPermission.ALWAYS_ALLOW
+
         // Amount condition
-        if (rule.maxAmount != null && amount != null && amount > rule.maxAmount) {
-            return false
+        if (rule.maxAmount != null) {
+            if (amount == null) { if (isAllow) return false }
+            else if (amount > rule.maxAmount) return false
         }
 
-        // Contact allowlist
-        if (rule.allowedContacts != null && contact != null) {
-            val allowed = parseStringList(rule.allowedContacts)
-            if (!allowed.any { it.equals(contact, ignoreCase = true) }) return false
+        // Contact allowlist — a listed name must appear in the request
+        if (rule.allowedContacts != null) {
+            val allowed = parseStringList(rule.allowedContacts).filter { it.isNotBlank() }
+            val g = goal.lowercase()
+            val mentioned = allowed.any { name ->
+                Regex("\\b${Regex.escape(name.lowercase())}\\b").containsMatchIn(g)
+            }
+            if (!mentioned) return false
         }
 
         // Time window
@@ -141,11 +154,11 @@ class AppPermissionManager @Inject constructor(
     }
 
     private fun parseStringList(json: String): List<String> {
+        // kotlinx JSON rather than org.json, so the rule logic runs in plain JVM unit tests
         return try {
-            val arr = JSONArray(json)
-            (0 until arr.length()).map { arr.getString(it) }
+            Json.parseToJsonElement(json).jsonArray.map { it.jsonPrimitive.content }
         } catch (_: Exception) {
-            json.split(",").map { it.trim() }
+            json.split(",").map { it.trim().removeSurrounding("\"") }
         }
     }
 }

@@ -15,7 +15,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -30,7 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -68,6 +66,7 @@ class FloatingBubble @Inject constructor(
 ) {
     private var windowManager: WindowManager? = null
     private var bubbleView: ComposeView? = null
+    private var bubbleLifecycle: MyLifecycleOwner? = null
     private var isShowing = false
 
     private var onTapCallback: (() -> Unit)? = null
@@ -107,17 +106,14 @@ class FloatingBubble @Inject constructor(
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        bubbleLifecycle = lifecycleOwner
 
         bubbleView = ComposeView(context).apply {
             setViewTreeLifecycleOwner(lifecycleOwner)
             setViewTreeViewModelStoreOwner(lifecycleOwner)
             setViewTreeSavedStateRegistryOwner(lifecycleOwner)
 
-            setContent {
-                BubbleContent(
-                    onTap = { onTapCallback?.invoke() }
-                )
-            }
+            setContent { BubbleContent() }
 
             // Make the view draggable via WindowManager layout params update
             setOnTouchListener(object : android.view.View.OnTouchListener {
@@ -145,7 +141,10 @@ class FloatingBubble @Inject constructor(
                             val dx = event.rawX - initialTouchX
                             val dy = event.rawY - initialTouchY
                             if (dx * dx + dy * dy < 100) { // tap threshold
-                                performClick()
+                                // No click listener is set on this view, so performClick()
+                                // did nothing — call the tap callback directly.
+                                v.performClick()
+                                onTapCallback?.invoke()
                             }
                             return true
                         }
@@ -172,8 +171,11 @@ class FloatingBubble @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Error removing bubble: ${e.message}")
         }
+        bubbleLifecycle?.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        bubbleLifecycle = null
         bubbleView = null
         windowManager = null
+        onTapCallback = null
         isShowing = false
         Log.i(TAG, "Floating bubble hidden")
     }
@@ -193,7 +195,7 @@ class FloatingBubble @Inject constructor(
 // ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun BubbleContent(onTap: () -> Unit) {
+private fun BubbleContent() {
     val infiniteTransition = rememberInfiniteTransition(label = "bubble_pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -214,10 +216,8 @@ private fun BubbleContent(onTap: () -> Unit) {
                 Brush.radialGradient(
                     colors = listOf(AuraPrimary, AuraSecondary)
                 )
-            )
-            .pointerInput(Unit) {
-                detectDragGestures { _, _ -> /* drag handled by OnTouchListener */ }
-            },
+            ),
+        // Tap + drag are handled by the View's OnTouchListener in show()
         contentAlignment = Alignment.Center
     ) {
         Icon(

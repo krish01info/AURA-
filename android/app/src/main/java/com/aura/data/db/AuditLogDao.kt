@@ -46,10 +46,10 @@ interface AuditLogDao {
     suspend fun getRecentHighRisk(sinceTimestamp: Long): Int
 
     /**
-     * Average payment amount extracted from CRITICAL audit log entries.
-     * Used by AnomalyDetector to detect unusually large payments.
-     * Returns null if no historical data exists.
+     * Detail strings of the most recent approved CRITICAL actions (payments).
+     * AnomalyDetector parses the amounts in Kotlin — the old SQL version cut the
+     * text at a fixed width, read "₹5,000" as 5, and averaged in 0 for rows without ₹.
      */
-    @Query("SELECT AVG(CAST(SUBSTR(detail, INSTR(detail, '\u20b9') + 1, 10) AS FLOAT)) FROM audit_log WHERE riskLevel = 'CRITICAL' AND outcome = 'USER_APPROVED' LIMIT 50")
-    suspend fun getAveragePaymentAmount(): Float?
+    @Query("SELECT detail FROM audit_log WHERE riskLevel = 'CRITICAL' AND outcome = 'USER_APPROVED' ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentApprovedCriticalDetails(limit: Int = 50): List<String>
 }

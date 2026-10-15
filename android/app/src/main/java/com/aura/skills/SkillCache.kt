@@ -53,7 +53,8 @@ class SkillCache @Inject constructor(
                 // Write-through to L2 on a background coroutine.
                 // We cannot suspend here (LinkedHashMap callback is synchronous),
                 // so we use a coroutine scope launched outside.
-                evictedSkillsBuffer.add(eldest.value)
+                // flushEvictions() reads the buffer under its own lock — write under it too
+                synchronized(evictedSkillsBuffer) { evictedSkillsBuffer.add(eldest.value) }
             }
             return evict
         }

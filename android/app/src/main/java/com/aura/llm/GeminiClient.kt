@@ -22,9 +22,10 @@ private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
 
 /**
  * Model id. Google retires models regularly — when this one is shut down, replace it
- * (see ai.google.dev/gemini-api/docs/deprecations).
+ * (see ai.google.dev/gemini-api/docs/deprecations). gemini-2.5-flash shuts down on
+ * 2026-10-16 (and was already returning 404 for some users).
  */
-private const val GEMINI_MODEL = "gemini-2.5-flash"
+private const val GEMINI_MODEL = "gemini-3.8-flash"
 
 /**
  * GeminiClient — fallback planner, used by TaskManager when Groq fails or has no key.
@@ -99,11 +100,13 @@ class GeminiClient @Inject constructor(
                             )
                         )
                     ),
+                    // Gemini 3: Google asks to keep the default temperature (1.0); lower values
+                    // can loop. Thinking can't be switched off on 3.8 Flash ("minimal" is an
+                    // error), so use "low" and leave room: thinking counts toward maxOutputTokens.
                     generationConfig = GeminiGenerationConfig(
-                        temperature = 0.1f,
-                        maxOutputTokens = 2048,
+                        maxOutputTokens = 8192,
                         responseMimeType = "application/json",
-                        thinkingConfig = GeminiThinkingConfig(thinkingBudget = 0)
+                        thinkingConfig = GeminiThinkingConfig(thinkingLevel = "low")
                     )
                 )
             )
@@ -157,15 +160,19 @@ data class GeminiPart(val text: String = "")
 
 @Serializable
 data class GeminiGenerationConfig(
-    val temperature: Float = 0.1f,
-    val maxOutputTokens: Int = 2048,
+    /** null = the model's default (keep it for Gemini 3). */
+    val temperature: Float? = null,
+    /** On Gemini 3 this includes the thinking tokens. */
+    val maxOutputTokens: Int? = null,
     val responseMimeType: String? = null,
-    /** 0 = no hidden "thinking" tokens: faster, and the JSON isn't cut off by the token limit. */
     val thinkingConfig: GeminiThinkingConfig? = null
 )
 
 @Serializable
-data class GeminiThinkingConfig(val thinkingBudget: Int = 0)
+data class GeminiThinkingConfig(
+    /** Gemini 3.x: "low" | "medium" | "high" (3.8 Flash has no "minimal"; thinkingBudget is for 2.5). */
+    val thinkingLevel: String? = null
+)
 
 @Serializable
 data class GeminiResponse(

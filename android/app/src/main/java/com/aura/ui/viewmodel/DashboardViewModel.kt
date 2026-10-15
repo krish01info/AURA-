@@ -12,6 +12,7 @@ import com.aura.data.model.SkillPackEntity
 import com.aura.data.model.TaskLogEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,17 +64,15 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             val allTasks = taskLogDao.getAllList()
             val completed = allTasks.count { it.status == "COMPLETED" }
-            val total = allTasks.size
+            // Only finished tasks count toward the success rate (not ones still running)
+            val total = allTasks.count { it.status == "COMPLETED" || it.status == "FAILED" || it.status == "CANCELLED" }
             val successRate = if (total > 0) (completed * 100 / total) else 0
             // Estimate 2min per task saved vs doing it manually
             val minutesSaved = completed * 2
             val memories = memoryDao.count()
             val skills = skillPackDao.count()
             val denied = auditLogDao.getDeniedCount()
-            val blockedApps = blockedAppDao.getAll().let { flow ->
-                // Count synchronously via count query isn't exposed — use list size
-                0  // will be populated from getAll() flow observer
-            }
+            val blockedApps = blockedAppDao.getAll().first().size
             val permRules = permissionRuleDao.count()
 
             _stats.value = DashboardStats(
@@ -83,6 +82,7 @@ class DashboardViewModel @Inject constructor(
                 totalSkills = skills,
                 totalMemories = memories,
                 deniedCount = denied,
+                blockedAppsCount = blockedApps,
                 permissionRulesCount = permRules
             )
         }

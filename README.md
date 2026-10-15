@@ -128,7 +128,7 @@ Full code map for contributors and AI tools: [AGENTS.md](AGENTS.md).
 | `openai/gpt-oss-120b` | Groq | Default |
 | `openai/gpt-oss-20b` | Groq | Fast fallback |
 | `qwen/qwen3.8-27b` | Groq | Last Groq fallback |
-| `gemini-2.5-flash` | Google AI Studio | Fallback when Groq fails or has no key |
+| `gemini-3.8-flash` | Google AI Studio | Fallback when Groq fails or has no key |
 
 Add your keys in the app's **Settings** screen (free keys: console.groq.com, aistudio.google.com).
 

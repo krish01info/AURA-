@@ -2,10 +2,9 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:canRequestFilterKeyEvents="true"
     android:description="@string/accessibility_description"
     android:notificationTimeout="100"
-    android:settingsActivity=".ui.MainActivity" />
+    android:settingsActivity="com.aura.ui.MainActivity" />

@@ -64,7 +64,7 @@ class PromptInjectionDefender @Inject constructor() {
     fun sanitize(goal: String): String {
         return goal
             .replace(Regex("\\[UI_CONTENT.*?\\]"), "")
-            .replace(Regex("\\[MEMORY_CONTEXT.*?\\]"), "")
+            .replace(Regex("\\[MEMORY.*?\\]"), "")   // memory context is labelled "[MEMORY: …]"
             .replace(Regex("\\[SYSTEM.*?\\]"), "")
             .replace(Regex("[\\x00-\\x1F\\x7F]"), "") // strip control chars
             .trim()
