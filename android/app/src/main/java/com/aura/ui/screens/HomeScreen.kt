@@ -3,6 +3,7 @@ package com.aura.ui.screens
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -13,43 +14,65 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.RecordVoiceOver
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.AccessibilityNew
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Fingerprint
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.PictureInPicture
+import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -64,8 +87,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,6 +102,7 @@ import com.aura.agent.RiskLevel
 import com.aura.agent.TaskState
 import com.aura.ui.theme.AuraCritical
 import com.aura.ui.theme.AuraPrimary
+import com.aura.ui.theme.AuraPrimaryVariant
 import com.aura.ui.theme.AuraSecondary
 import com.aura.ui.theme.AuraSuccess
 import com.aura.ui.theme.AuraWarning
@@ -82,10 +110,8 @@ import com.aura.ui.viewmodel.HomeViewModel
 import com.aura.voice.KeywordSpotter
 
 /**
- * HomeScreen — the main AURA interface.
- *
- * Phase 3: ConfirmationOverlay + BiometricGate for HIGH/CRITICAL actions
- * Phase 4: Voice toggle, listening indicator, WakeWord bubble toggle
+ * HomeScreen — the main AURA interface: status orb, "Hey AURA" switch, command bar,
+ * setup notices, the Stop button and the approval sheet (BiometricGate for CRITICAL).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,51 +132,42 @@ fun HomeScreen(
     val voiceModelOfferDismissed by viewModel.voiceModelOfferDismissed.collectAsState()
     var commandText by remember { mutableStateOf("") }
 
+    fun send() {
+        if (commandText.isNotBlank()) {
+            viewModel.executeCommand(commandText)
+            commandText = ""
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "AURA",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = AuraPrimary
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Agent",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                            )
-                        }
+                        Text(
+                            text = "AURA",
+                            style = MaterialTheme.typography.titleLarge,
+                            letterSpacing = 2.sp
+                        )
                     },
                     actions = {
-                        // Accessibility status dot
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (isAccessibilityEnabled) AuraSuccess else AuraCritical)
-                        )
-                        Spacer(Modifier.width(8.dp))
+                        val tint = MaterialTheme.colorScheme.onSurfaceVariant
                         IconButton(onClick = onNavigateToDashboard) {
-                            Icon(Icons.Default.BarChart, "Dashboard", tint = AuraPrimary)
+                            Icon(Icons.Rounded.BarChart, "Dashboard", tint = tint)
                         }
                         IconButton(onClick = onNavigateToSkillStore) {
-                            Icon(Icons.Default.Extension, "Skill Store", tint = AuraSecondary)
+                            Icon(Icons.Rounded.Extension, "Skill Store", tint = tint)
                         }
                         IconButton(onClick = onNavigateToLog) {
-                            Icon(Icons.Default.History, "Task log", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Rounded.History, "Task log", tint = tint)
                         }
                         IconButton(onClick = onNavigateToSettings) {
-                            Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Rounded.Settings, "Settings", tint = tint)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.background
                     )
                 )
             }
@@ -159,51 +176,22 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(16.dp),
+                    .imePadding()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ── Accessibility warning ─────────────────────────────
+                // ── Setup notices ────────────────────────────────────
                 AnimatedVisibility(visible = !isAccessibilityEnabled) {
-                    Column {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = AuraWarning.copy(alpha = 0.15f)),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("⚠️", fontSize = 20.sp)
-                                Spacer(Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        "Accessibility Service disabled",
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = AuraWarning
-                                    )
-                                    Text(
-                                        "AURA needs this to control your phone",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                    )
-                                }
-                                Spacer(Modifier.weight(1f))
-                                Button(
-                                    onClick = {
-                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = AuraWarning)
-                                ) {
-                                    Text("Enable", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
+                    NoticeCard(
+                        icon = Icons.Rounded.AccessibilityNew,
+                        tint = AuraWarning,
+                        title = "Turn on AURA's Accessibility service",
+                        body = "AURA needs it to tap and type in other apps for you.",
+                        actionLabel = "Turn on",
+                        onAction = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    )
                 }
 
-                // ── Setup: offline voice model for live tasks ─────────
                 AnimatedVisibility(
                     visible = isAccessibilityEnabled && !voiceModelOfferDismissed &&
                         voiceModelState !is KeywordSpotter.ModelState.Ready
@@ -215,175 +203,125 @@ fun HomeScreen(
                     )
                 }
 
-                // ── Overlay permission hint ───────────────────────────
                 AnimatedVisibility(visible = !viewModel.canShowOverlay) {
-                    Column {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = AuraSecondary.copy(alpha = 0.1f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("💬", fontSize = 18.sp)
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "Grant overlay permission for floating mic bubble",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Button(
-                                    onClick = { viewModel.requestOverlayPermission() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = AuraSecondary),
-                                    modifier = Modifier.padding(start = 8.dp)
-                                ) {
-                                    Text("Grant", fontSize = 11.sp)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
+                    NoticeCard(
+                        icon = Icons.Rounded.PictureInPicture,
+                        tint = AuraSecondary,
+                        title = "Floating mic",
+                        body = "Allow \"Display over other apps\" to get a mic button on any screen.",
+                        actionLabel = "Allow",
+                        onAction = { viewModel.requestOverlayPermission() }
+                    )
                 }
 
-                Spacer(Modifier.height(16.dp))
-
-                // ── Main Orb ─────────────────────────────────────────
-                AuraOrb(taskState = taskState, isListening = isListening)
-                Spacer(Modifier.height(16.dp))
-
-                // ── Status text ──────────────────────────────────────
+                // ── Orb + status ─────────────────────────────────────
+                Spacer(Modifier.weight(1f))
+                AuraOrb(taskState = taskState, isListening = isListening, isSpeaking = isSpeaking)
+                Spacer(Modifier.height(20.dp))
+                val (title, detail) = statusLines(taskState, isListening)
                 Text(
-                    text = if (isListening) "🎤 Listening…"
-                    else if (isSpeaking) "🔊 Speaking…"
-                    else taskState.statusText(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
-
+                if (!detail.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 4,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                }
                 Spacer(Modifier.weight(1f))
 
-                // ── Voice Mode Toggle (Phase 4) ───────────────────────
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isVoiceEnabled)
-                            AuraPrimary.copy(alpha = 0.12f)
-                        else
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                // ── "Hey AURA" switch ────────────────────────────────
+                WakeWordCard(enabled = isVoiceEnabled, onToggle = viewModel::setVoiceEnabled)
+                Spacer(Modifier.height(12.dp))
+
+                // ── Command bar ──────────────────────────────────────
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = commandText,
+                        onValueChange = { commandText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Type a command…") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(28.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { send() }),
+                        trailingIcon = {
+                            if (commandText.isNotBlank()) {
+                                IconButton(onClick = { send() }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.Send,
+                                        "Send command",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        )
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    FilledIconButton(
+                        onClick = { viewModel.startVoiceInput() },
+                        modifier = Modifier.size(56.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (isListening) AuraSecondary else MaterialTheme.colorScheme.primary,
+                            contentColor = if (isListening) Color.White else MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
                         Icon(
-                            imageVector = if (isVoiceEnabled) Icons.Default.RecordVoiceOver else Icons.Default.MicOff,
-                            contentDescription = null,
-                            tint = if (isVoiceEnabled) AuraPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Wake Word Mode",
-                                fontWeight = FontWeight.SemiBold,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                "Say \"Hey AURA\" to activate",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                        }
-                        Switch(
-                            checked = isVoiceEnabled,
-                            onCheckedChange = { viewModel.setVoiceEnabled(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = AuraPrimary)
+                            imageVector = if (isListening) Icons.Rounded.GraphicEq else Icons.Rounded.Mic,
+                            contentDescription = "Voice input"
                         )
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
-
-                // ── Command Input ────────────────────────────────────
-                OutlinedTextField(
-                    value = commandText,
-                    onValueChange = { commandText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = {
-                        Text(
-                            "Say your command…",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                        )
-                    },
-                    trailingIcon = {
-                        Row {
-                            IconButton(onClick = { viewModel.startVoiceInput() }) {
-                                Icon(
-                                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                                    contentDescription = "Voice input",
-                                    tint = if (isListening) AuraWarning else AuraSecondary
-                                )
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (commandText.isNotBlank()) {
-                                        viewModel.executeCommand(commandText)
-                                        commandText = ""
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Default.Send, "Send command", tint = AuraPrimary)
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AuraPrimary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                )
-
-                Spacer(Modifier.height(16.dp))
-
-                // ── Phase 1 Test Panel (debug builds only — it messages "Rahul") ──
+                // ── Debug-only test buttons (they message "Rahul") ───
                 if (com.aura.BuildConfig.DEBUG) {
+                    Spacer(Modifier.height(12.dp))
                     Phase1TestPanel(viewModel = viewModel)
                 }
-
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
             }
         }
 
-        // ── Floating Emergency STOP button ──────────────────────────
-        val showStop = taskState is TaskState.Executing || taskState is TaskState.Planning
+        // ── Stop button while a task runs ───────────────────────────
+        val showStop = taskState is TaskState.Executing || taskState is TaskState.Planning ||
+            taskState is TaskState.Verifying || taskState is TaskState.Live ||
+            taskState is TaskState.WaitingForUnlock
         AnimatedVisibility(
             visible = showStop,
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
+                .padding(bottom = 160.dp)
         ) {
             Button(
                 onClick = { viewModel.emergencyStop() },
-                colors = ButtonDefaults.buttonColors(containerColor = AuraCritical),
-                shape = RoundedCornerShape(50)
+                colors = ButtonDefaults.buttonColors(containerColor = AuraCritical, contentColor = Color.White),
+                shape = CircleShape,
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
-                Icon(Icons.Default.Stop, null)
+                Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("STOP", fontWeight = FontWeight.Bold)
+                Text("Stop")
             }
         }
 
-        // ── Confirmation / Biometric overlay ─────────────────────────
+        // ── Approval sheet (fingerprint for CRITICAL) ───────────────
         if (taskState is TaskState.WaitingForUser) {
             ConfirmationOverlay(
                 state = taskState as TaskState.WaitingForUser,
@@ -405,6 +343,61 @@ fun HomeScreen(
 // Composables
 // ──────────────────────────────────────────────────────────────
 
+/** Tinted card for setup hints: icon, title, one line, optional buttons. */
+@Composable
+private fun NoticeCard(
+    icon: ImageVector,
+    tint: Color,
+    title: String,
+    body: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    dismissLabel: String? = null,
+    onDismiss: (() -> Unit)? = null,
+    extra: @Composable ColumnScope.() -> Unit = {}
+) {
+    Column {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = tint.copy(alpha = 0.10f)
+        ) {
+            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(tint.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(2.dp))
+                    Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    extra()
+                    if (actionLabel != null || dismissLabel != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            if (dismissLabel != null && onDismiss != null) {
+                                TextButton(onClick = onDismiss) { Text(dismissLabel) }
+                            }
+                            if (actionLabel != null && onAction != null) {
+                                TextButton(onClick = onAction) { Text(actionLabel, color = tint) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
 /** First-time setup card: download the offline voice model used by live tasks. */
 @Composable
 private fun VoiceModelCard(
@@ -412,99 +405,164 @@ private fun VoiceModelCard(
     onDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Column {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = AuraPrimary.copy(alpha = 0.10f)),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("Offline voice for live tasks", fontWeight = FontWeight.SemiBold, color = AuraPrimary)
-                val detail = when (state) {
-                    is KeywordSpotter.ModelState.Downloading -> "Downloading… ${state.percent}%"
-                    is KeywordSpotter.ModelState.Failed -> "Download failed (${state.reason}). Try again on Wi-Fi."
-                    else -> "One-time download, about 36 MB (Wi-Fi recommended). Lets AURA act on words like " +
-                        "\"capture\" or \"next\" inside any app, even offline."
-                }
-                Text(
-                    detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                if (state !is KeywordSpotter.ModelState.Downloading) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Not now", fontSize = 12.sp) }
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = onDownload,
-                            colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary)
-                        ) { Text("Download", fontSize = 12.sp) }
-                    }
-                }
-            }
+    val downloading = state as? KeywordSpotter.ModelState.Downloading
+    NoticeCard(
+        icon = Icons.Rounded.Download,
+        tint = AuraPrimary,
+        title = "Offline voice for live tasks",
+        body = when (state) {
+            is KeywordSpotter.ModelState.Downloading -> "Downloading… ${state.percent}%"
+            is KeywordSpotter.ModelState.Failed -> "Download failed (${state.reason}). Try again on Wi-Fi."
+            else -> "One-time download, about 36 MB (Wi-Fi recommended). Lets AURA act on words like " +
+                "\"capture\" or \"next\" inside any app, even offline."
+        },
+        actionLabel = if (downloading == null) "Download" else null,
+        onAction = onDownload,
+        dismissLabel = if (downloading == null) "Not now" else null,
+        onDismiss = onDismiss
+    ) {
+        if (downloading != null) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { downloading.percent / 100f },
+                modifier = Modifier.fillMaxWidth().clip(CircleShape),
+                color = AuraPrimary,
+                trackColor = AuraPrimary.copy(alpha = 0.15f)
+            )
         }
-        Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** The "Hey AURA" always-listening switch. The whole card toggles it. */
+@OptIn(ExperimentalMaterial3Api::class)   // clickable Surface (experimental in older Material 3)
+@Composable
+private fun WakeWordCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Surface(
+        onClick = { onToggle(!enabled) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = if (enabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (enabled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (enabled) Icons.Rounded.RecordVoiceOver else Icons.Rounded.MicOff,
+                    contentDescription = null,
+                    tint = if (enabled) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("\"Hey AURA\"", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (enabled) "Listening from any app" else "Off — tap the mic to talk",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onToggle)
+        }
+    }
+}
+
+/** What the orb shows for a state: colour, icon and how much it breathes. */
+private data class OrbLook(val color: Color, val icon: ImageVector, val pulse: Float, val periodMs: Int)
+
+private fun orbLook(state: TaskState, isListening: Boolean, isSpeaking: Boolean): OrbLook = when {
+    isListening -> OrbLook(AuraSecondary, Icons.Rounded.Mic, 0.16f, 700)
+    isSpeaking -> OrbLook(AuraPrimary, Icons.Rounded.GraphicEq, 0.10f, 900)
+    else -> when (state) {
+        is TaskState.Planning -> OrbLook(AuraPrimary, Icons.Rounded.AutoAwesome, 0.12f, 900)
+        is TaskState.Executing -> OrbLook(AuraPrimary, Icons.Rounded.AutoAwesome, 0.10f, 1100)
+        is TaskState.Verifying -> OrbLook(AuraPrimary, Icons.Rounded.Visibility, 0.08f, 1100)
+        is TaskState.Live -> OrbLook(AuraSecondary, Icons.Rounded.Hearing, 0.12f, 1000)
+        is TaskState.WaitingForUser -> OrbLook(AuraWarning, Icons.Rounded.Shield, 0.06f, 1400)
+        is TaskState.WaitingForUnlock -> OrbLook(AuraWarning, Icons.Rounded.Lock, 0.06f, 1400)
+        is TaskState.Completed -> OrbLook(AuraSuccess, Icons.Rounded.Check, 0.03f, 2200)
+        is TaskState.Failed -> OrbLook(AuraCritical, Icons.Rounded.ErrorOutline, 0.03f, 2200)
+        else -> OrbLook(AuraPrimary, Icons.Rounded.AutoAwesome, 0.04f, 2400)
     }
 }
 
 @Composable
-private fun AuraOrb(taskState: TaskState, isListening: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "orb")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = when {
-            isListening -> 1.25f
-            taskState is TaskState.Executing || taskState is TaskState.Planning -> 1.15f
-            else -> 1.02f
-        },
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (isListening) 600 else 1000),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "orb_scale"
+private fun AuraOrb(taskState: TaskState, isListening: Boolean, isSpeaking: Boolean) {
+    val look = orbLook(taskState, isListening, isSpeaking)
+    val color by animateColorAsState(look.color, animationSpec = tween(500), label = "orb_color")
+    val breath by rememberInfiniteTransition(label = "orb").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(look.periodMs), RepeatMode.Reverse),
+        label = "orb_breath"
     )
 
-    val orbColor = when {
-        isListening -> AuraSecondary
-        else -> when (taskState) {
-            is TaskState.Executing   -> AuraPrimary
-            is TaskState.Planning    -> AuraSecondary
-            is TaskState.Completed   -> AuraSuccess
-            is TaskState.Failed      -> AuraCritical
-            is TaskState.WaitingForUser -> AuraWarning
-            else -> AuraPrimary.copy(alpha = 0.5f)
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .size(120.dp)
-            .scale(scale)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(colors = listOf(orbColor, orbColor.copy(alpha = 0.3f)))
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = if (isListening) "🎤" else "✦",
-            fontSize = 48.sp,
-            color = Color.White
+    Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
+        // Soft glow
+        Box(
+            modifier = Modifier
+                .size(200.dp)
+                .scale(1f + look.pulse * breath)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(color.copy(alpha = 0.32f), Color.Transparent)))
         )
+        // Halo ring
+        Box(
+            modifier = Modifier
+                .size(136.dp)
+                .scale(1f + look.pulse * 0.5f * breath)
+                .clip(CircleShape)
+                .background(color.copy(alpha = 0.14f))
+        )
+        // Core
+        Box(
+            modifier = Modifier
+                .size(104.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        listOf(lerp(color, Color.White, 0.18f), lerp(color, AuraPrimaryVariant, 0.35f))
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(look.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+        }
     }
 }
 
-private fun TaskState.statusText(): String = when (this) {
-    is TaskState.Created        -> "Ready. Give me a command."
-    is TaskState.Planning       -> "Thinking…"
-    is TaskState.Executing      -> "Step ${stepIndex + 1} of $totalSteps: ${currentStep.action}"
-    is TaskState.WaitingForUser -> "Waiting for your approval"
-    is TaskState.WaitingForUnlock -> "Unlock the app — I'll continue after that"
-    is TaskState.Live           -> status ?: "Listening for: ${words.joinToString(" · ")}"
-    is TaskState.Verifying      -> "Verifying…"
-    is TaskState.Completed      -> "✓ $summary"
-    is TaskState.Failed         -> "Failed: $reason"
-    is TaskState.Cancelled      -> "Stopped."
+/** Title + detail line under the orb. */
+private fun statusLines(state: TaskState, isListening: Boolean): Pair<String, String?> {
+    if (isListening) return "Listening…" to "Go ahead — I'm listening"
+    return when (state) {
+        is TaskState.Created -> "Ready when you are" to "Say \"Hey AURA\" or type a command below"
+        is TaskState.Planning -> "Thinking…" to "Working out the steps"
+        is TaskState.Executing -> {
+            val step = state.currentStep
+            val what = step.action.replace('_', ' ') + (step.text?.let { " \"$it\"" } ?: "")
+            "Working on it" to "Step ${state.stepIndex + 1} of ${state.totalSteps} · $what"
+        }
+        is TaskState.WaitingForUser -> "Needs your OK" to "Check the request below"
+        is TaskState.WaitingForUnlock -> "Unlock ${state.appName ?: "the app"}" to "I'll continue after that"
+        is TaskState.Live -> "Live" to (state.status ?: "Listening for: ${state.words.joinToString(" · ")}")
+        is TaskState.Verifying -> "Checking…" to "Making sure it worked"
+        is TaskState.Completed -> "Done" to state.summary.takeUnless { it.trim('!', '.').equals("Done", true) }
+        is TaskState.Failed -> "Couldn't finish" to state.reason
+        is TaskState.Cancelled -> "Stopped" to null
+    }
 }
 
 @Composable
@@ -519,89 +577,97 @@ private fun ConfirmationOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.75f)),
-        contentAlignment = Alignment.Center
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f))
+            .pointerInput(Unit) { detectTapGestures { } },   // block taps on the screen behind
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Card(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            ),
-            shape = RoundedCornerShape(24.dp)
+                .padding(12.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 12.dp
         ) {
             Column(
-                modifier = Modifier.padding(28.dp),
+                modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(riskColor.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isCritical) Icons.Rounded.Fingerprint else Icons.Rounded.Shield,
+                        null,
+                        tint = riskColor,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
                 Text(
-                    text = if (isCritical) "💳 CRITICAL ACTION" else "⚠️ CONFIRM ACTION",
-                    fontWeight = FontWeight.Bold,
-                    color = riskColor,
-                    fontSize = 18.sp
+                    text = if (isCritical) "Confirm with fingerprint" else "Allow this step?",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Risk Level: ${state.riskLevel.name}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = riskColor.copy(alpha = 0.7f)
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
                     text = state.riskAction.message
-                        ?: "Allow this action: ${state.riskAction.action}?",
+                        ?: "Allow this action: ${state.riskAction.action.replace('_', ' ')}?",
+                    style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (isCritical) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "⚠️ This action cannot be undone",
-                        color = AuraCritical,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "🔐 Biometric authentication required",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.bodySmall
+                        "This can't be undone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = riskColor
                     )
                 }
-                // Anomaly warning banner
                 if (state.anomalyWarning != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = AuraCritical.copy(alpha = 0.15f)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(AuraCritical.copy(alpha = 0.10f))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
+                        Icon(Icons.Rounded.WarningAmber, null, tint = AuraCritical, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = state.anomalyWarning,
-                            color = AuraCritical,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(10.dp)
+                            text = state.anomalyWarning.removePrefix("⚠️").trim(),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(22.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
+                    OutlinedButton(
                         onClick = onDeny,
-                        colors = ButtonDefaults.buttonColors(containerColor = AuraCritical),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).height(48.dp)
                     ) {
-                        Text("✗ Deny")
+                        Text("Deny")
                     }
                     Button(
                         onClick = onAllow,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isCritical) AuraWarning else AuraSuccess
-                        ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = if (isCritical) ButtonDefaults.buttonColors(containerColor = AuraCritical, contentColor = Color.White)
+                            else ButtonDefaults.buttonColors()
                     ) {
-                        Text(if (isCritical) "🔐 Authenticate" else "✓ Allow")
+                        if (isCritical) {
+                            Icon(Icons.Rounded.Fingerprint, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (isCritical) "Verify" else "Allow")
                     }
                 }
             }
@@ -614,31 +680,29 @@ private fun ConfirmationOverlay(
  */
 @Composable
 private fun Phase1TestPanel(viewModel: HomeViewModel) {
-    androidx.compose.material3.HorizontalDivider(
-        modifier = Modifier.padding(vertical = 4.dp),
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+    HorizontalDivider(
+        modifier = Modifier.padding(bottom = 8.dp),
+        color = MaterialTheme.colorScheme.outlineVariant
     )
     Text(
-        text = "Phase 1 Tests (no LLM)",
+        text = "Debug tests (no LLM)",
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 4.dp)
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        androidx.compose.material3.OutlinedButton(
+        OutlinedButton(
             onClick = { viewModel.runWhatsAppTest() },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
+            modifier = Modifier.weight(1f)
         ) {
             Text("Open WhatsApp", style = MaterialTheme.typography.labelSmall)
         }
-        androidx.compose.material3.OutlinedButton(
+        OutlinedButton(
             onClick = { viewModel.runWhatsAppMessageTest() },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
+            modifier = Modifier.weight(1f)
         ) {
             Text("WA → Rahul", style = MaterialTheme.typography.labelSmall)
         }

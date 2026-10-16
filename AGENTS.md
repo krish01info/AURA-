@@ -109,7 +109,7 @@ Wrong docs cost more tokens than missing ones.
 
 | File | Lines | Note |
 |---|---|---|
-| `ui/screens/HomeScreen.kt` | ~585 | Compose UI only |
+| `ui/screens/HomeScreen.kt` | ~710 | Compose UI only |
 | `ui/screens/PermissionsScreen.kt` | ~475 | Compose UI only |
 | `ui/screens/SettingsScreen.kt` | ~455 | Compose UI only |
 | `agent/TaskManager.kt` | ~460 | Core loop — open the function you need |

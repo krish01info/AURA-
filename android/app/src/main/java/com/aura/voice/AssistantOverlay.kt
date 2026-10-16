@@ -1,6 +1,7 @@
 package com.aura.voice
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -34,6 +35,7 @@ private const val TAG = "AssistantOverlay"
  *  3. Otherwise nothing is shown ([show] returns false); voice still works.
  *
  * Built with plain Views (no Compose lifecycle needed in a service window).
+ * Colours match the app's theme (ui/theme/AURATheme) and follow the phone's light/dark setting.
  * While a task runs the panel becomes a small banner at the top with a Stop button.
  * It lets AURA's own tap/swipe gestures through ([ActionExecutor.gestureListener]),
  * so it never blocks the taps AURA performs in the target app.
@@ -71,6 +73,38 @@ class AssistantOverlay @Inject constructor(
     private var bodyView: TextView? = null
     private var buttonRow: LinearLayout? = null
     private var compact = false
+    private var palette = Palette.DARK
+
+    /** Panel colours — the same values as AURATheme's light / dark schemes. */
+    private data class Palette(
+        val card: Int, val stroke: Int, val brand: Int, val title: Int, val body: Int,
+        val primary: Int, val onPrimary: Int, val secondary: Int, val onSecondary: Int,
+        val stop: Int, val onStop: Int
+    ) {
+        companion object {
+            val DARK = Palette(
+                card = Color.parseColor("#F51C1F31"), stroke = Color.parseColor("#2A2E45"),
+                brand = Color.parseColor("#9B9DFB"), title = Color.parseColor("#E6E7F2"),
+                body = Color.parseColor("#A4A8C3"),
+                primary = Color.parseColor("#6366F1"), onPrimary = Color.WHITE,
+                secondary = Color.parseColor("#2A2E45"), onSecondary = Color.parseColor("#E6E7F2"),
+                stop = Color.parseColor("#3D1A1F"), onStop = Color.parseColor("#F87171")
+            )
+            val LIGHT = Palette(
+                card = Color.parseColor("#FAFFFFFF"), stroke = Color.parseColor("#DCDDEA"),
+                brand = Color.parseColor("#5254D4"), title = Color.parseColor("#1A1B2E"),
+                body = Color.parseColor("#555973"),
+                primary = Color.parseColor("#5254D4"), onPrimary = Color.WHITE,
+                secondary = Color.parseColor("#E8E8F2"), onSecondary = Color.parseColor("#1A1B2E"),
+                stop = Color.parseColor("#FFE1DE"), onStop = Color.parseColor("#B91C1C")
+            )
+
+            fun of(ctx: Context): Palette {
+                val night = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                return if (night == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
+            }
+        }
+    }
 
     val isShowing: Boolean get() = root != null
 
@@ -204,6 +238,7 @@ class AssistantOverlay @Inject constructor(
     }
 
     private fun buildPanel(ctx: Context): LinearLayout {
+        palette = Palette.of(ctx)
         val pad = dp(ctx, 20)
         val outer = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -213,28 +248,37 @@ class AssistantOverlay @Inject constructor(
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
             background = GradientDrawable().apply {
-                cornerRadius = dp(ctx, 24).toFloat()
-                setColor(Color.parseColor("#F21B1B2F"))
-                setStroke(dp(ctx, 1), Color.parseColor("#556C63FF"))
+                cornerRadius = dp(ctx, 28).toFloat()
+                setColor(palette.card)
+                setStroke(dp(ctx, 1), palette.stroke)
             }
-            elevation = dp(ctx, 8).toFloat()
+            elevation = dp(ctx, 10).toFloat()
         }
 
+        // Brand row: a small accent dot + "AURA"
         val brand = TextView(ctx).apply {
             text = "AURA"
-            setTextColor(Color.parseColor("#8C84FF"))
+            setTextColor(palette.brand)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.2f
+            gravity = Gravity.CENTER_VERTICAL
+            compoundDrawablePadding = dp(ctx, 8)
+            setCompoundDrawablesRelative(GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                colors = intArrayOf(palette.brand, palette.primary)
+                setSize(dp(ctx, 10), dp(ctx, 10))
+                setBounds(0, 0, dp(ctx, 10), dp(ctx, 10))
+            }, null, null, null)
         }
         val title = TextView(ctx).apply {
-            setTextColor(Color.WHITE)
+            setTextColor(palette.title)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setPadding(0, dp(ctx, 6), 0, 0)
         }
         val body = TextView(ctx).apply {
-            setTextColor(Color.parseColor("#C8C8DC"))
+            setTextColor(palette.body)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setPadding(0, dp(ctx, 6), 0, 0)
             maxLines = 6
@@ -262,16 +306,19 @@ class AssistantOverlay @Inject constructor(
         val row = buttonRow ?: return
         val ctx = row.context
         row.removeAllViews()
-        fun add(label: String, primary: Boolean, onClick: () -> Unit) {
+        val p = palette
+        fun add(label: String, primary: Boolean, onClick: () -> Unit, danger: Boolean = false) {
             row.addView(Button(ctx).apply {
                 text = label
                 isAllCaps = false
-                setTextColor(if (primary) Color.WHITE else Color.parseColor("#C8C8DC"))
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                stateListAnimator = null   // flat, no default shadow
+                setTextColor(when { danger -> p.onStop; primary -> p.onPrimary; else -> p.onSecondary })
                 background = GradientDrawable().apply {
                     cornerRadius = dp(ctx, 20).toFloat()
-                    setColor(Color.parseColor(if (primary) "#6C63FF" else "#2E2E48"))
+                    setColor(when { danger -> p.stop; primary -> p.primary; else -> p.secondary })
                 }
-                setPadding(dp(ctx, 18), 0, dp(ctx, 18), 0)
+                setPadding(dp(ctx, 20), 0, dp(ctx, 20), 0)
                 setOnClickListener { onClick() }
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -279,7 +326,7 @@ class AssistantOverlay @Inject constructor(
             ).apply { marginStart = dp(ctx, 8) })
         }
         actions.onCancel?.let { add("Cancel", false, it) }
-        actions.onStop?.let { add("Stop", false, it) }
+        actions.onStop?.let { add("Stop", false, it, danger = true) }
         actions.onWrong?.let { add("Wrong", false, it) }
         actions.onClose?.let { add("Close", false, it) }
         actions.onTalk?.let { add("Talk", false, it) }

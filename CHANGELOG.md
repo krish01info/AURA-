@@ -7,6 +7,14 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
 
 ## [Unreleased]
 
+### Changed — look
+- New calm look: softer indigo palette, light and dark themes that follow the phone, rounded shapes, no emoji
+- Home: breathing orb with an icon per state (listening, thinking, done, failed…), clearer status lines,
+  setup notices as one card style (with a download progress bar), a "Hey AURA" card you can tap anywhere,
+  a pill command bar (keyboard Send works) with a big mic button, Stop also during live tasks / checks / unlock
+- Approval sheet slides up from the bottom with Deny / Allow (fingerprint button for payments)
+- The "Hey AURA" popup matches the app and follows light/dark; Stop is red
+
 ### Fixed — safety
 - CRITICAL steps (payments) now really need fingerprint/face: `MainActivity` is a `FragmentActivity`, so the
   BiometricPrompt path runs; before, the in-app Allow button approved them without it

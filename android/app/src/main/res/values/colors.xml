@@ -1,0 +1,4 @@
+<resources>
+    <!-- Same as AURATheme's background (LightColorScheme / DarkColorScheme) -->
+    <color name="aura_window_background">#F7F7FC</color>
+</resources>

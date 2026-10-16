@@ -1,7 +1,8 @@
 <resources>
-    <!-- Dark window background so there's no white flash before Compose renders -->
-    <style name="Theme.AURA" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
+    <!-- Window background matches the Compose theme so there's no flash before it renders.
+         Light here, dark in values-night (follows the phone's setting, like AURATheme). -->
+    <style name="Theme.AURA" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/aura_window_background</item>
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
