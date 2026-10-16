@@ -349,9 +349,13 @@ class TaskManager @Inject constructor(
         val executed = mutableListOf<ActionStep>()
         var current = steps
         var recoveries = 0
+        // Decided once from the original plan: recovered steps start from the current
+        // screen without open_app, and would otherwise run as app "unknown" — skipping
+        // blocked apps, per-app rules and the reopen after a fingerprint approval.
+        val primaryApp = primaryAppOf(steps)
         while (true) {
             val confirmedBefore = executed.any { it.action == ActionStep.CONFIRM_SEND }
-            when (val outcome = runStepsInternal(taskId, goal, current, confirmedBefore)) {
+            when (val outcome = runStepsInternal(taskId, goal, current, confirmedBefore, primaryApp)) {
                 RunOutcome.Success -> {
                     executed += current
                     return FlowResult.Done(executed, recovered = recoveries > 0)
@@ -503,9 +507,9 @@ class TaskManager @Inject constructor(
         taskId: String,
         goal: String,
         steps: List<ActionStep>,
-        confirmedBefore: Boolean = false
+        confirmedBefore: Boolean = false,
+        primaryApp: String = primaryAppOf(steps)
     ): RunOutcome {
-        val primaryApp = steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
         // Permission rules may name a whole intent ("send_money"), not just a step ("tap")
         val goalIntent = SkillIdentity.inferIntent(goal, primaryApp).second
 
@@ -701,6 +705,10 @@ class TaskManager @Inject constructor(
         }
         Log.e(TAG, "❌ Task [$taskId] failed: $reason")
     }
+
+    /** The app a plan works in: the first step that names one. */
+    private fun primaryAppOf(steps: List<ActionStep>): String =
+        steps.firstOrNull { it.pkg != null }?.pkg ?: "unknown"
 
     /** A tap whose target reads like Send / Pay / Delete … (by text or view id). */
     private fun isIrreversibleTap(step: ActionStep): Boolean {

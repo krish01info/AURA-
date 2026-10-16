@@ -65,9 +65,11 @@ object SkillIdentity {
             return "payment" to "check_balance"
         }
 
-        // Messaging intents — calls first, otherwise "call Mom on WhatsApp" is filed
-        // under send_message just because it mentions WhatsApp.
-        if (CALL_WORDS.containsMatchIn(lower)) {   // whole words: "bring" isn't "ring"
+        // Messaging intents — a call word wins over app names ("call Mom on WhatsApp"),
+        // but not over a message word before it ("text Mom to call me back").
+        val callAt = CALL_WORDS.find(lower)?.range?.first   // whole words: "bring" isn't "ring"
+        val messageAt = MESSAGE_WORDS.find(lower)?.range?.first
+        if (callAt != null && (messageAt == null || callAt < messageAt)) {
             return "messaging" to "make_call"
         }
         if (lower.containsAny("message", "msg", "text", "whatsapp", "chat")) {
@@ -163,6 +165,7 @@ object SkillIdentity {
     }
 
     private val CALL_WORDS = Regex("\\b(call|calling|ring|dial)\\b")
+    private val MESSAGE_WORDS = Regex("\\b(message|messages|msg|text|texts)\\b")
 
     private fun String.containsAny(vararg terms: String): Boolean =
         terms.any { this.contains(it) }

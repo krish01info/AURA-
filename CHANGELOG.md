@@ -18,6 +18,11 @@ Format: `## [vX.Y.Z] - YYYY-MM-DD`
   no longer the only guard); after a fingerprint approval inside AURA, the task's app is reopened first
 - Screen text can no longer fake the `[UI_CONTENT_END]` marker to step out of the screen-data block
 - Learned skills uploaded to the cloud no longer carry the raw request ("send hi to Rahul") in `description`
+- Steps re-planned after a failure ran as app "unknown": blocked apps and per-app rules were skipped, and AURA
+  didn't reopen the app after a fingerprint approval. They now keep the original plan's app
+- "Text Mom to call me back" was filed as a call (`make_call`), so message rules and skills missed it
+- Spoken amounts ("send 500 rupees", "250 rs", "1,000/-") are now read, so "allow up to ₹500" rules apply to them
+- The large-payment warning no longer treats a plain number ("order 12345") as the amount
 
 ### Fixed — features
 - Floating mic bubble: tapping it did nothing (the tap called `performClick()` with no listener)

@@ -16,6 +16,13 @@ class SkillIdentityTest {
         assertEquals("messaging" to "send_message", intent("text priya to bring milk", "com.whatsapp"))
     }
 
+    @Test fun `a message that mentions calling is still a message`() {
+        assertEquals("messaging" to "send_message", intent("text mom to call me back", "com.whatsapp"))
+        assertEquals("messaging" to "send_message", intent("message rahul i'll call you later", "com.whatsapp"))
+        assertEquals("messaging" to "make_call", intent("whatsapp call rahul", "com.whatsapp"))
+        assertEquals("messaging" to "make_call", intent("call mom and text her the address", "com.whatsapp"))
+    }
+
     @Test fun `sending an email is compose, not the inbox`() {
         assertEquals("email" to "compose_send", intent("send an email to priya", "com.google.android.gm"))
         assertEquals("email" to "read_inbox", intent("open my gmail inbox", "com.google.android.gm"))

@@ -62,8 +62,9 @@ class AnomalyDetector @Inject constructor(
      * e.g. step.message = "Send ₹5000 to Rahul?" → extracts 5000.
      */
     private suspend fun checkPaymentAmount(step: ActionStep): AnomalyResult {
-        val requested = (AmountParser.parse(step.message, allowPlainNumber = true)
-            ?: return AnomalyResult.OK).toFloat()
+        // Same rule as the history below: only a number marked as rupees counts —
+        // "Pay for order 12345?" isn't a ₹12,345 payment.
+        val requested = (AmountParser.parse(step.message) ?: return AnomalyResult.OK).toFloat()
         val history = auditLogDao.getRecentApprovedCriticalDetails()
             .mapNotNull { AmountParser.parse(it)?.toFloat() }
             .filter { it > 0f }
