@@ -56,8 +56,21 @@ Check new or changed code against `SKILL.md` and the repo's own rules. Report pr
 9. **Verification:** Were `./gradlew assembleDebug` and `./gradlew testDebugUnitTest` (and lint/detekt/ktlint if
    configured) run after the final edit?
 
+## Confirm before reporting
+- Check each problem before you report it: re-read the code path and the callers, and run the existing tests that
+  cover it if you can. A problem you only suspect from a name or a single line isn't confirmed yet.
+- If you still can't confirm it, report it as unsure and say what would settle it: a test, a phone check, or a
+  file you couldn't read. Never call a guess a bug.
+
 ## Report
-- Group by file and keep the order above. One line per problem: `path:line`, what is wrong, then the plain fix (as
-  short code if helpful).
+- Give each problem a level:
+  - **Bug:** wrong now, such as a crash, a wrong result or a safety hole. It must be fixed.
+  - **Risk:** can break in some case, or is fragile. The user decides.
+  - **Style:** readability, naming or comments. Nice to fix.
+- List bugs first, then risks, then style, every one on its own line. Within a level, keep the order of the
+  questions above.
+- One line per problem: `[level] path:line`, what is wrong, then the plain fix (as short code if helpful). Add
+  "(unsure)" when it isn't confirmed.
 - Mark a judgment call as one, and say why.
-- End with the number of problems, or "Nothing found". No praise and no summary of what the code does.
+- End with the count per level ("2 bugs, 1 risk, 3 style"), or "Nothing found". No praise and no summary of what
+  the code does.
