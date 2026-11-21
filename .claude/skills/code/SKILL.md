@@ -1,6 +1,6 @@
 ---
 name: code
-description: Write, fix and refactor Android (Kotlin/Java) code the user can explain line by line, add tests to untested code, and explain how existing code works. Enforces root-cause bug fixes with a failing test first, behavior-preserving refactors, clean OOP design and reusability, small incremental diffs, clear Android layer boundaries, lifecycle and thread safety, and Gradle verification. Starts with a plan the user approves.
+description: Write, fix and refactor Android (Kotlin/Java) code the user can explain line by line, add tests to untested code, and explain how existing code works. Enforces root-cause bug fixes with a failing test first, behavior-preserving refactors, clean OOP design and reusability, small incremental diffs, clear Android layer boundaries, lifecycle and thread safety, current Android rules for services, receivers, WorkManager, permissions and the manifest, and Gradle verification. Starts with a plan the user approves.
 argument-hint: "[what to build, fix, refactor, test or explain]"
 ---
 
@@ -175,6 +175,75 @@ Write clean object-oriented Kotlin/Java that stays easy to extend and reuse with
   cases that can't happen; do handle real failures (network errors, missing permissions, null API fields, empty states).
 - **Formatting:** standard 4-space indentation (Kotlin official style). Never add a new Gradle dependency without
   asking first.
+
+## Android parts without a screen
+Services, receivers, background jobs, permissions and the manifest break in ways screens don't. The rest of this
+skill still applies: explainable code, one job per class, logic out of the Android component.
+
+- **Check the current rules first.** Android changes them almost every release. Before writing service, receiver,
+  background-job, permission or manifest code, read the official docs for the app's `targetSdk` and name the page
+  you used. Don't rely on memory.
+- **Keep the component thin.** A `Service`, `BroadcastReceiver` or `Worker` only receives the event and hands it to
+  a plain class that holds the logic, so that class can be tested and explained on its own.
+
+**Services**
+- Use a foreground service only for work the user can see and would miss if it stopped, such as listening to the
+  mic. Declare its `foregroundServiceType` and the matching permission in the manifest.
+- Since Android 12, an app in the background usually can't start a foreground service. A mic or camera service
+  must start while the app is in front: on Android 14+ it throws `SecurityException` otherwise, and older versions
+  start it without mic or camera access. Plan where it starts, and handle the start failing.
+- Call `startForeground()` right after starting, stop the service when the work ends, and cancel its coroutine
+  scope in `onDestroy()`.
+```kotlin
+// the type must match foregroundServiceType in the manifest (required on Android 14+)
+ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+```
+
+**Broadcast receivers**
+- `onReceive` runs on the main thread and must return within seconds. Hand longer work to WorkManager.
+- A receiver registered in code needs an exported flag on Android 14+. Unregister it when you're done.
+```kotlin
+// only this app sends this broadcast, so other apps must not reach the receiver
+ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+```
+
+**Background jobs (WorkManager)**
+- Use WorkManager, not a service, for work that must happen eventually even if the app closes, such as syncs and
+  daily checks.
+- Give repeating work a unique name (`enqueueUniquePeriodicWork`), so it's never scheduled twice.
+- Write workers so running twice does no harm. Return `Result.retry()` for temporary failures like no network.
+
+**Runtime permissions**
+- Ask when the user starts the feature that needs it, with one sentence on why. Never ask for everything at app
+  start.
+- Check the permission every time before using it, because the user can take it back at any time.
+- Handle "deny" and "don't ask again": the feature explains what's missing and how to turn it on in Settings.
+```kotlin
+val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+    PackageManager.PERMISSION_GRANTED
+if (!granted) return MicResult.NeedsPermission // the screen asks the user; this class never does
+```
+
+**Special permissions** (overlay, Accessibility, notification access, exact alarms, installing apps)
+- The user turns these on in system Settings, not in a dialog. Explain why first, open the right Settings screen,
+  and check again when the user comes back.
+
+**The manifest**
+- Every new permission, exported component, intent filter or `<queries>` entry needs the user's yes. Say what it
+  allows.
+- Set `android:exported` on purpose: `false` unless another app must start the component. If it's `true`, protect it
+  with a permission, as system-bound services do with their `BIND_...` permission.
+- Since Android 11, other apps are hidden unless listed in `<queries>`. Add only what's needed.
+
+**The app can be killed**
+- Android can stop the app at any time, even in the middle of a task. Save what must survive (Room, DataStore) and
+  make sure the restart path works.
+- Never keep an `Activity`, `View` or screen `Context` in a singleton or a static field, because it leaks memory.
+  Use the application context.
+
+**Android versions**
+- Wrap any API newer than `minSdk` in `if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.X)` and handle the older
+  path, or use the `Compat` helper that does it for you.
 
 ## Comments and KDoc
 - A comment gives the *why*, not the *what*, and never git history ("changed from X"). Good reasons to comment:

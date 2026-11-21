@@ -41,6 +41,9 @@ Check new or changed code against `SKILL.md` and the repo's own rules. Report pr
    - Any Fragment ViewBinding not cleared in `onDestroyView()`?
    - Any side effect or heavy work running directly inside a Composable body?
    - Any unexplained `!!`?
+   - For services, receivers, workers, permissions and the manifest: is the Android class thin? Was the current
+     rule for `targetSdk` followed, with the doc named? Is each permission checked before use, with "deny"
+     handled? Was every manifest change approved, with `exported` set on purpose?
 6. **Scope & cleanliness:** Dead code, unused imports or parameters, unrelated formatting diffs, speculative guards for
    impossible cases, or an unapproved Gradle dependency?
 7. **Comments:** Missing *why* on non-obvious Android/API workarounds, comments that repeat the code or tell history,
