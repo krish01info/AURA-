@@ -4,6 +4,10 @@ What only this repo has. `repo_rules.md` points here, and where the two differ t
 
 ## Owner
 - Project owner / git user: Krish Sharma, GitHub `krish01info` (merges into `main` and reviews plan changes).
+- Krish is the only person working on AURA, in Claude Code. So two parts of `repo_rules.md` change:
+  - §1: ask about a part's plan document only once. Save his answer in `memory/` and don't ask again.
+  - §5: his plan changes are the owner's decision. Beside the decision, write his reason and the date instead of
+    "Pending owner review". What a plan lists as not decided is his to settle.
 
 ## Read at the start of a conversation
 - `CLAUDE.md` (current status, next steps, pitfalls already hit) and `AGENTS.md` (code map, data flow, conventions).
