@@ -1073,6 +1073,169 @@
   {
    "app": "android.web",
    "category": "web",
+   "action": "weather",
+   "name": "Weather",
+   "risk": "LOW",
+   "description": "Today's weather (Google's answer)",
+   "patterns": [
+    "what's the weather",
+    "whats the weather",
+    "what is the weather",
+    "what's the weather today",
+    "whats the weather today",
+    "what is the weather today",
+    "how's the weather",
+    "hows the weather",
+    "weather today",
+    "today's weather",
+    "todays weather",
+    "will it rain today",
+    "weather forecast"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "weather"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "weather_place",
+   "name": "Weather in a place",
+   "risk": "LOW",
+   "description": "Weather somewhere else (Google's answer)",
+   "patterns": [
+    "what's the weather in {place}",
+    "whats the weather in {place}",
+    "what is the weather in {place}",
+    "how's the weather in {place}",
+    "hows the weather in {place}",
+    "weather in {place}",
+    "will it rain in {place}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "weather in {place}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "cricket_score",
+   "name": "Cricket score",
+   "risk": "LOW",
+   "description": "Live cricket scores (Google's answer)",
+   "patterns": [
+    "cricket score",
+    "live cricket score",
+    "what's the cricket score",
+    "whats the cricket score",
+    "what's the score",
+    "whats the score",
+    "live score",
+    "match score"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "live cricket score"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "news",
+   "name": "News headlines",
+   "risk": "LOW",
+   "description": "Top news (Google's answer)",
+   "patterns": [
+    "latest news",
+    "today's news",
+    "todays news",
+    "news today",
+    "news headlines",
+    "top news",
+    "what's the news",
+    "whats the news",
+    "show me the news"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "latest news"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "define",
+   "name": "Word meaning",
+   "risk": "LOW",
+   "description": "What a word means (Google's answer)",
+   "patterns": [
+    "meaning of {word}",
+    "what is the meaning of {word}",
+    "what's the meaning of {word}",
+    "whats the meaning of {word}",
+    "what does {word} mean",
+    "define {word}",
+    "definition of {word}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "define {word}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
+   "action": "translate",
+   "name": "Translate",
+   "risk": "LOW",
+   "description": "Translate a phrase (Google's answer)",
+   "patterns": [
+    "translate {text_content} to {language}",
+    "translate {text_content} into {language}",
+    "translate {text_content} in {language}",
+    "how do you say {text_content} in {language}",
+    "how do i say {text_content} in {language}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.WEB_SEARCH",
+     "extras": {
+      "query": "translate {text_content} to {language}"
+     }
+    }
+   ]
+  },
+  {
+   "app": "android.web",
+   "category": "web",
    "action": "open_site",
    "name": "Open website",
    "risk": "LOW",

@@ -49,6 +49,12 @@ screen; you flip the switch.
 | Maps: bike | "Bike directions to India Gate" | Maps shows the two-wheeler route | never |
 | Maps: public transport | "Bus route to India Gate" | Maps shows bus, train or metro routes | never |
 | Maps: near me | "Find petrol pump near me" | Maps lists petrol pumps around you | never |
+| Weather | "What's the weather" | Google opens with today's weather | never |
+| Weather in a place | "Weather in Mumbai" | Google opens with Mumbai's weather | never |
+| Cricket score | "Cricket score" | Google opens with live cricket scores | never |
+| News | "Latest news" | Google opens with top news | never |
+| Word meaning | "Meaning of serendipity" | Google opens with what the word means | never |
+| Translate | "Translate good morning to Hindi" | Google opens with the translation | never |
 
 ## Safety
 | Feature | Say or do | Should happen | Last passed |
