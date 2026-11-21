@@ -63,6 +63,16 @@ screen; you flip the switch.
 | Home screen | In any app, "go to home screen" | The home screen shows | never |
 | Scroll down | On a long page in Chrome, "scroll down" | The page scrolls down once | never |
 | Scroll up | Then "scroll up" | The page scrolls up once | never |
+| Airplane mode | "Turn on airplane mode" | The screen with the airplane mode switch opens | never |
+| Do not disturb | "Turn on do not disturb" | The Do Not Disturb screen opens | never |
+| NFC | "Turn on NFC" | The NFC panel opens | never |
+| Data usage | "Data usage" | The data usage screen opens | never |
+| Storage | "Check my storage" | The storage screen opens | never |
+| Battery saver | "Turn on battery saver" | The battery saver screen opens | never |
+| Night light | "Turn on night light" | The night light (eye comfort) screen opens; note it here if the phone has none | never |
+| Screen cast | "Cast my screen" | The cast screen opens | never |
+| Date and time | "Change the time" | The date and time screen opens | never |
+| About phone | "About phone" | The About phone screen opens | never |
 
 ## Safety
 | Feature | Say or do | Should happen | Last passed |

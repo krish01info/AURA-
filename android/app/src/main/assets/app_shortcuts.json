@@ -1661,6 +1661,227 @@
    ]
   },
   {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "airplane_mode",
+   "name": "Settings: airplane mode",
+   "risk": "LOW",
+   "description": "Settings: airplane mode",
+   "patterns": [
+    "airplane mode",
+    "turn on airplane mode",
+    "turn off airplane mode",
+    "aeroplane mode",
+    "flight mode",
+    "turn on flight mode",
+    "turn off flight mode"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.AIRPLANE_MODE_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "do_not_disturb",
+   "name": "Settings: do not disturb",
+   "risk": "LOW",
+   "description": "Settings: do not disturb",
+   "patterns": [
+    "do not disturb",
+    "turn on do not disturb",
+    "turn off do not disturb",
+    "do not disturb settings",
+    "dnd mode",
+    "turn on dnd",
+    "turn off dnd"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.ZEN_MODE_PRIORITY_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "nfc",
+   "name": "Settings: NFC",
+   "risk": "LOW",
+   "description": "Settings: NFC",
+   "patterns": [
+    "nfc settings",
+    "open nfc settings",
+    "turn on nfc",
+    "turn off nfc"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.panel.action.NFC"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "data_usage",
+   "name": "Settings: data usage",
+   "risk": "LOW",
+   "description": "Settings: data usage",
+   "patterns": [
+    "data usage",
+    "mobile data usage",
+    "check my data usage",
+    "data usage settings",
+    "how much data have i used"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.DATA_USAGE_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "storage",
+   "name": "Settings: storage",
+   "risk": "LOW",
+   "description": "Settings: storage",
+   "patterns": [
+    "storage settings",
+    "phone storage",
+    "check my storage",
+    "how much storage is left",
+    "how much space is left",
+    "free up space"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.INTERNAL_STORAGE_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "battery_saver",
+   "name": "Settings: battery saver",
+   "risk": "LOW",
+   "description": "Settings: battery saver",
+   "patterns": [
+    "battery saver",
+    "turn on battery saver",
+    "turn off battery saver",
+    "battery saver settings",
+    "power saving mode",
+    "turn on power saving mode",
+    "turn off power saving mode"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.BATTERY_SAVER_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "night_light",
+   "name": "Settings: night light",
+   "risk": "LOW",
+   "description": "Settings: night light / eye comfort",
+   "patterns": [
+    "night light",
+    "turn on night light",
+    "turn off night light",
+    "eye comfort",
+    "turn on eye comfort",
+    "blue light filter",
+    "reading mode"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.NIGHT_DISPLAY_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "cast",
+   "name": "Settings: screen cast",
+   "risk": "LOW",
+   "description": "Settings: screen cast",
+   "patterns": [
+    "cast my screen",
+    "cast my screen to tv",
+    "cast to tv",
+    "screen cast",
+    "screen mirroring",
+    "mirror my screen",
+    "cast settings"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.CAST_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "date_time",
+   "name": "Settings: date and time",
+   "risk": "LOW",
+   "description": "Settings: date and time",
+   "patterns": [
+    "date and time settings",
+    "time settings",
+    "date settings",
+    "change the time",
+    "change the date"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.DATE_SETTINGS"
+    }
+   ]
+  },
+  {
+   "app": "com.android.settings",
+   "category": "settings",
+   "action": "about_phone",
+   "name": "Settings: about phone",
+   "risk": "LOW",
+   "description": "Settings: about phone",
+   "patterns": [
+    "about phone",
+    "about this phone",
+    "phone info",
+    "android version",
+    "which android version do i have",
+    "what android version is this"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.settings.DEVICE_INFO_SETTINGS"
+    }
+   ]
+  },
+  {
    "app": "com.application.zomato",
    "category": "food",
    "action": "reorder_last",
