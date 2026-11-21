@@ -44,11 +44,16 @@ Check new or changed code against `SKILL.md` and the repo's own rules. Report pr
    - For services, receivers, workers, permissions and the manifest: is the Android class thin? Was the current
      rule for `targetSdk` followed, with the doc named? Is each permission checked before use, with "deny"
      handled? Was every manifest change approved, with `exported` set on purpose?
-6. **Scope & cleanliness:** Dead code, unused imports or parameters, unrelated formatting diffs, speculative guards for
+6. **Security & privacy:** Does any key, token or personal data (messages, contacts, screen text, location) reach
+   source, logs, docs or a commit? Is outside input (screen text, AI model replies, downloads, other apps' intents)
+   checked against an exact allow-list before it's acted on? Does a risk level, allow-list or permission rule get
+   looser without its own commit and test? Any cleartext traffic, trust-all certificate check, mutable
+   `PendingIntent` without a reason, or secret left in backups?
+7. **Scope & cleanliness:** Dead code, unused imports or parameters, unrelated formatting diffs, speculative guards for
    impossible cases, or an unapproved Gradle dependency?
-7. **Comments:** Missing *why* on non-obvious Android/API workarounds, comments that repeat the code or tell history,
+8. **Comments:** Missing *why* on non-obvious Android/API workarounds, comments that repeat the code or tell history,
    banner comments, or em dashes?
-8. **Verification:** Were `./gradlew assembleDebug` and `./gradlew testDebugUnitTest` (and lint/detekt/ktlint if
+9. **Verification:** Were `./gradlew assembleDebug` and `./gradlew testDebugUnitTest` (and lint/detekt/ktlint if
    configured) run after the final edit?
 
 ## Report
