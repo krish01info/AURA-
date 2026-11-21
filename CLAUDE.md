@@ -29,7 +29,7 @@ The team and AI rules are in `agents/`. At the start of every session:
   stored skills run with **no LLM call** via phrase patterns; lookup RAM → disk → Room → cloud → LLM creates.
   See `android/app/src/main/java/com/aura/skills/package.md`.
 - ✅ App shortcuts (2026-10-11): built-in skills live in `android/app/src/main/assets/app_shortcuts.json`
-  (53 skills, 30+ apps, intents/links/media keys); phones re-download it from `main` daily.
+  (91 skills, 30+ apps, intents/links/media keys); phones re-download it from `main` daily.
   **Add/fix an app: edit the JSON, bump `version`, merge** — `AppShortcutsTest` validates it in CI.
   New actions `intent` (allow-list), `media`, `now_playing`, `reply`, `read_notifications` (notification access, optional).
 - ⚠️ First phone test (2026-10-11) found: commands with two parts only opened the app, "call X" only dialed,

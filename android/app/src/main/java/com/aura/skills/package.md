@@ -36,7 +36,7 @@ Design background: `docs/design/SKILL-SYSTEM.md` (older; this file wins where th
 | OsMigrationHandler.kt | On Android upgrade, marks old-version-group variants stale. |
 
 ## App shortcuts (`android/app/src/main/assets/app_shortcuts.json`)
-- ~50 built-in skills for 30+ apps (WhatsApp, Spotify, YouTube, Maps, Uber, Amazon, Gmail,
+- ~90 built-in skills for 30+ apps (WhatsApp, Spotify, YouTube, Maps, Uber, Amazon, Gmail,
   settings panels…), mostly intents/links/media keys instead of tapping.
 - **Add or fix an app = edit the JSON, bump `version`, merge to `main`.** Phones fetch it within a day.
 - `AppShortcutsTest` (CI) checks every entry: patterns usable, every step slot filled by every
