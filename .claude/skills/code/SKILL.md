@@ -345,6 +345,23 @@ val pending = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_I
   1. what changed and why
   2. which Gradle commands were run and passed
   3. what was *not* checked (e.g., manual UI/navigation check on a device or emulator)
+- For anything bigger than a small change (see "Start with a plan"), add a walkthrough in the chat, so the user
+  can explain every line without you. Don't save it to a file.
+
+**Walk through the change**
+1. **Follow the order the code runs,** from where it starts (a screen, a service, a public function), not the
+   order the diff lists files.
+2. **Show the code in pieces of about 20 to 40 lines.** For each: `file:line`, what it does in one or two plain
+   sentences, and why it's there (the reason from the discussion, or the Android rule behind it).
+3. **Explain each new Android or Kotlin idea in one sentence** the first time it comes up ("a `StateFlow` is a
+   value the screen watches and redraws on").
+4. **Point out the one or two lines most likely to break** or be asked about: threading, lifecycle, safety.
+5. **List imports, renames and formatting in one line** instead of walking through them.
+6. **End with the one place worth reading first,** and offer to explain any line again. Don't quiz the user.
+
+**Pull request facts**
+- Give the user bullet facts to write the pull request from: what changed, why, how it was tested, and what
+  wasn't. Don't write the description itself, because it should be in the user's own words.
 
 ## Examples
 Drop 2 or 3 clean, real files from your Android repo into `examples/` (such as a `ViewModel`, a `Repository`, and a
