@@ -718,6 +718,27 @@
   {
    "app": "android.media",
    "category": "media",
+   "action": "unmute",
+   "name": "Media: unmute",
+   "risk": "LOW",
+   "description": "Media: unmute",
+   "patterns": [
+    "unmute",
+    "unmute the sound",
+    "unmute volume",
+    "unmute the phone",
+    "turn the sound back on"
+   ],
+   "steps": [
+    {
+     "action": "media",
+     "text": "unmute"
+    }
+   ]
+  },
+  {
+   "app": "android.media",
+   "category": "media",
    "action": "now_playing",
    "name": "What's playing",
    "risk": "LOW",
@@ -1274,6 +1295,57 @@
    ]
   },
   {
+   "app": "android.email",
+   "category": "email",
+   "action": "compose_subject",
+   "name": "Email: new with subject",
+   "risk": "LOW",
+   "description": "New email with the subject filled in",
+   "patterns": [
+    "write an email about {subject}",
+    "send an email about {subject}",
+    "compose an email about {subject}",
+    "draft an email about {subject}",
+    "new email about {subject}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.SENDTO",
+     "uri": "mailto:?subject={subject}"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.keep",
+   "category": "notes",
+   "action": "add_note",
+   "name": "Keep: new note",
+   "risk": "LOW",
+   "description": "Save a note in Google Keep (the share sheet opens if Keep isn't installed)",
+   "patterns": [
+    "take a note {note_text}",
+    "take a note saying {note_text}",
+    "take a note that {note_text}",
+    "make a note {note_text}",
+    "make a note saying {note_text}",
+    "note down {note_text}",
+    "add a note {note_text}",
+    "write a note {note_text}"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.SEND",
+     "mime": "text/plain",
+     "pkg": "com.google.android.keep",
+     "extras": {
+      "android.intent.extra.TEXT": "{note_text}"
+     }
+    }
+   ]
+  },
+  {
    "app": "com.google.android.gm",
    "category": "email",
    "action": "read_inbox",
@@ -1368,6 +1440,27 @@
      "action": "timer",
      "time": "{time}",
      "message": "AURA"
+    }
+   ]
+  },
+  {
+   "app": "com.android.deskclock",
+   "category": "clock",
+   "action": "show_alarms",
+   "name": "Clock: show alarms",
+   "risk": "LOW",
+   "description": "Open the alarm list",
+   "patterns": [
+    "show my alarms",
+    "show alarms",
+    "open my alarms",
+    "open alarms",
+    "check my alarms"
+   ],
+   "steps": [
+    {
+     "action": "intent",
+     "intent_action": "android.intent.action.SHOW_ALARMS"
     }
    ]
   },
@@ -2025,6 +2118,86 @@
       "stop listening",
       "stop"
      ]
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "system",
+   "action": "back",
+   "name": "Go back",
+   "risk": "LOW",
+   "description": "Press Back",
+   "patterns": [
+    "go back",
+    "press back",
+    "press the back button",
+    "go to the previous screen"
+   ],
+   "steps": [
+    {
+     "action": "back"
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "system",
+   "action": "home",
+   "name": "Home screen",
+   "risk": "LOW",
+   "description": "Go to the home screen",
+   "patterns": [
+    "go to home screen",
+    "go to the home screen",
+    "home screen",
+    "show the home screen",
+    "press home",
+    "press the home button"
+   ],
+   "steps": [
+    {
+     "action": "home"
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "system",
+   "action": "scroll_down",
+   "name": "Scroll down",
+   "risk": "LOW",
+   "description": "Scroll the current app down once",
+   "patterns": [
+    "scroll down",
+    "scroll down a bit",
+    "scroll the page down",
+    "page down"
+   ],
+   "steps": [
+    {
+     "action": "scroll",
+     "direction": "down"
+    }
+   ]
+  },
+  {
+   "app": "any",
+   "category": "system",
+   "action": "scroll_up",
+   "name": "Scroll up",
+   "risk": "LOW",
+   "description": "Scroll the current app up once",
+   "patterns": [
+    "scroll up",
+    "scroll up a bit",
+    "scroll the page up",
+    "page up"
+   ],
+   "steps": [
+    {
+     "action": "scroll",
+     "direction": "up"
     }
    ]
   }

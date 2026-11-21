@@ -55,6 +55,14 @@ screen; you flip the switch.
 | News | "Latest news" | Google opens with top news | never |
 | Word meaning | "Meaning of serendipity" | Google opens with what the word means | never |
 | Translate | "Translate good morning to Hindi" | Google opens with the translation | never |
+| Unmute | "Mute", then "unmute" | The sound comes back | never |
+| Show alarms | "Show my alarms" | The clock app opens on the alarm list | never |
+| Keep note | "Take a note buy milk" | Google Keep opens a new note with "buy milk"; without Keep, the share sheet opens | never |
+| Email with subject | "Write an email about leave tomorrow" | A new email opens with that subject | never |
+| Go back | In Chrome, open a link, then "go back" | Chrome goes back one page | never |
+| Home screen | In any app, "go to home screen" | The home screen shows | never |
+| Scroll down | On a long page in Chrome, "scroll down" | The page scrolls down once | never |
+| Scroll up | Then "scroll up" | The page scrolls up once | never |
 
 ## Safety
 | Feature | Say or do | Should happen | Last passed |
