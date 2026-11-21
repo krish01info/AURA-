@@ -5,6 +5,12 @@
 >
 > **Current status, next steps, build/ship workflow and known pitfalls: [CLAUDE.md](CLAUDE.md)**
 > (any AI tool should read it too, not just Claude).
+>
+> **Rules for everyone, people and AI:** [agents/repo_rules.md](agents/repo_rules.md), then
+> [agents/this_repo.md](agents/this_repo.md), which wins where they differ. Read `HANDOFF.md` and
+> `memory/MEMORY.md` first if they exist. Android coding and refactoring guide with a review checklist:
+> [.claude/skills/code/SKILL.md](.claude/skills/code/SKILL.md) (`/code` in Claude Code). AI assistants never push,
+> open pull requests or merge.
 
 ## 1. Project at a glance
 

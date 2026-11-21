@@ -7,6 +7,16 @@ before risky steps. Kotlin + Compose, single module `android/app`. Owner: krish0
 The code map, data flow and conventions are in **AGENTS.md** (imported below).
 Read it, then only the `package.md` of the package you're changing.
 
+## Rules (read first)
+
+The team and AI rules are in `agents/`. At the start of every session:
+
+- Read `agents/repo_rules.md`, then `agents/this_repo.md`. Where they differ, `this_repo.md` wins.
+- Read `HANDOFF.md` and `memory/MEMORY.md` if they exist. Both are gitignored notes; keep them that way.
+- When writing or refactoring Android code, use the code skill (`/code`, in `.claude/skills/code/`), and check
+  the diff against its `checklist.md` before finishing.
+- AI assistants never push, open pull requests or merge. Commit on a branch and give the user the commands.
+
 ## Current status (updated 2026-10-11)
 
 - ✅ CI builds green (first ever on 2026-10-11 after removing a machine-specific `org.gradle.java.home`).
@@ -45,7 +55,8 @@ Read it, then only the `package.md` of the package you're changing.
 
 ## Next steps (in priority order)
 
-1. Re-test on the phone after the device-test fixes; get logcat (`adb logcat -s TaskManager ActionExecutor SkillRouter WakeWordService VoiceManager`) for anything still failing.
+1. Re-test on the phone after the device-test fixes: work through `docs/testing/phone-tests.md` (every row is
+   "never" so far) and fill in "Last passed"; get logcat (`adb logcat -s TaskManager ActionExecutor SkillRouter WakeWordService VoiceManager`) for anything still failing.
 2. **Live tasks — built, not phone-tested** (`docs/plans/live-tasks-plan.md`). Owner's choices: words start /
    capture / stop, English (India) model only, no time limit (until "stop"), no mic-test screen. Test on the phone:
    "voice camera" → say capture; "record a video and take photos when I say capture"; "hands free scrolling" in
@@ -60,15 +71,18 @@ Read it, then only the `package.md` of the package you're changing.
    PolicyEngine, PromptInjectionDefender, VariantRanking (SkillRouter's selection), CloudSkillVetting.
 5. Cloud: the owner sets up Supabase (see status above); then test upload/download between two phones.
 
-## How to build and ship (cloud sessions have no Android SDK)
+## How to build and ship
 
-- Work on a branch → push → open a PR → GitHub Actions "Android CI" compiles it.
-- `gh pr create` (GraphQL) is blocked here: use `gh api repos/krish01info/AURA-/pulls -f title=… -f head=… -f base=main -F body=@file`.
-- Raw CI logs are blocked here. On failure the workflow re-posts errors as annotations:
-  `gh api repos/krish01info/AURA-/check-runs/<job id>/annotations`.
-- Green CI → merge (owner allows merging to `main`): `gh api -X PUT repos/krish01info/AURA-/pulls/<n>/merge -f merge_method=merge`.
+- Locally, from `android/`: `./gradlew assembleDebug` and `./gradlew testDebugUnitTest` (all checks:
+  `agents/this_repo.md`). Cloud sessions have no Android SDK, so there the "Android CI" run on the pushed
+  branch is the check.
+- The AI commits on a branch. The user pushes and opens the pull request, and the owner merges after CI
+  passes (`agents/repo_rules.md` §6). The AI gives the commands instead of running them, such as
+  `git push -u origin <branch>` and the link to open the pull request on GitHub.
+- Raw CI logs are blocked in cloud sessions. On failure the workflow re-posts errors as annotations, which
+  can be read with `gh api repos/krish01info/AURA-/check-runs/<job id>/annotations`.
 - `main` builds upload `aura-debug-apk` (~87 MB, unshrunk) and `aura-release-apk` (~24 MB, R8-shrunk) artifacts.
-- **Releases:** bump `versionCode`/`versionName`, add `## [vX.Y.Z] - date` to CHANGELOG.md (= release notes),
+- **Releases (the owner does these):** bump `versionCode`/`versionName`, add `## [vX.Y.Z] - date` to CHANGELOG.md (= release notes),
   merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. `release.yml` builds a signed release APK and publishes
   it; phones update through the in-app checker (`update/`).
 - **Signing:** every CI/release APK is signed with one permanent key (repo secrets `AURA_KEYSTORE_BASE64`,

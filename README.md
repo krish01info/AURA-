@@ -262,6 +262,8 @@ AURA-/
 │   ├── plans/                   implementation-plan.md, MVP.md, roadmap.md
 │   └── research/                deep-research-report.md
 ├── .github/workflows/           CI and release
+├── .claude/skills/code/         Code skill for AI assistants (/code in Claude Code)
+├── agents/                      Team and AI rules (repo_rules.md, this_repo.md)
 ├── AGENTS.md                    Code map for contributors and AI tools
 ├── CLAUDE.md                    Points Claude Code at AGENTS.md
 ├── CHANGELOG.md
@@ -289,8 +291,8 @@ Each package folder has a short `package.md` describing its files.
 
 Contributions are welcome.
 
-1. Fork the repo and create a branch: `git checkout -b feature/your-feature`
-2. Read [AGENTS.md](AGENTS.md) and the `package.md` of the package you're changing
+1. Fork the repo and create a branch: `git checkout -b <your-name>/<task>`
+2. Read [agents/repo_rules.md](agents/repo_rules.md), [AGENTS.md](AGENTS.md) and the `package.md` of the package you're changing
 3. Add tests for new behaviour, and update the `package.md` if you add or rename classes
 4. Open a pull request
 

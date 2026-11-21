@@ -21,5 +21,11 @@ google-services.json
 .env.*
 !.env.example
 
-# ── Claude Code local overrides (shared settings.json stays tracked) ─────────
-.claude/settings.local.json
+# ── AI assistant notes and local settings (agents/repo_rules.md §8) ─────────
+# .claude/settings.json and .claude/skills/ are shared and stay tracked; the rest of .claude/ is local.
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+# Root only: android/.../com/aura/memory/ is source code and must stay tracked.
+/HANDOFF.md
+/memory/
