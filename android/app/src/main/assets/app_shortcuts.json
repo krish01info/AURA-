@@ -1,5 +1,5 @@
 {
- "version": 4,
+ "version": 5,
  "note": "AURA app shortcuts. Each entry becomes a built-in skill (no LLM, no screen tapping where possible). Edit and bump 'version'; phones fetch this file daily from GitHub. Step keys: see data/model/ActionStep.kt.",
  "skills": [
   {
@@ -784,6 +784,155 @@
      "action": "open_link",
      "pkg": "com.google.android.apps.maps",
      "uri": "https://www.google.com/maps/search/?api=1&query={place}"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "start_navigation",
+   "name": "Maps: start navigation",
+   "risk": "LOW",
+   "description": "Start turn-by-turn navigation right away",
+   "patterns": [
+    "start navigation to {destination}",
+    "start navigating to {destination}",
+    "drive to {destination}",
+    "drive me to {destination}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/dir/?api=1&destination={destination}&dir_action=navigate"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "walking_directions",
+   "name": "Maps: walking directions",
+   "risk": "LOW",
+   "description": "Walking route",
+   "patterns": [
+    "walking directions to {destination}",
+    "walk to {destination}",
+    "directions to {destination} on foot",
+    "how do i walk to {destination}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/dir/?api=1&destination={destination}&travelmode=walking"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "bike_directions",
+   "name": "Maps: bike directions",
+   "risk": "LOW",
+   "description": "Two-wheeler route (where Maps has it, like India)",
+   "patterns": [
+    "bike directions to {destination}",
+    "directions to {destination} by bike",
+    "route to {destination} by bike",
+    "take me to {destination} by bike"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/dir/?api=1&destination={destination}&travelmode=two-wheeler"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "transit_directions",
+   "name": "Maps: public transport",
+   "risk": "LOW",
+   "description": "Bus, train or metro route",
+   "patterns": [
+    "bus route to {destination}",
+    "train route to {destination}",
+    "metro route to {destination}",
+    "public transport to {destination}",
+    "how do i get to {destination} by bus",
+    "how do i get to {destination} by metro"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/dir/?api=1&destination={destination}&travelmode=transit"
+    },
+    {
+     "action": "wait",
+     "wait_ms": 2000
+    },
+    {
+     "action": "verify",
+     "pkg": "com.google.android.apps.maps"
+    }
+   ]
+  },
+  {
+   "app": "com.google.android.apps.maps",
+   "category": "navigation",
+   "action": "search_nearby",
+   "name": "Maps: near me",
+   "risk": "LOW",
+   "description": "Find places near you",
+   "patterns": [
+    "find {place} near me",
+    "show {place} near me",
+    "search {place} near me",
+    "{place} near me",
+    "nearest {place}",
+    "where is the nearest {place}"
+   ],
+   "steps": [
+    {
+     "action": "open_link",
+     "pkg": "com.google.android.apps.maps",
+     "uri": "https://www.google.com/maps/search/?api=1&query={place}%20near%20me"
     },
     {
      "action": "wait",

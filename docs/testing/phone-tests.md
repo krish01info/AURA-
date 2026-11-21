@@ -38,6 +38,18 @@ New phone-only features get a new row in the same change.
 | Play Store search | "Search for Spotify on Play Store" | The Play Store opens on the search results | never |
 | Knows the screen | With YouTube already open, "Hey AURA, search for cats here" | It searches inside the open YouTube app instead of opening something else | never |
 
+## Shortcuts
+These come from `app_shortcuts.json` and skip the AI plan, so they should be quick. Settings shortcuts open the
+screen; you flip the switch.
+
+| Feature | Say or do | Should happen | Last passed |
+|---|---|---|---|
+| Maps: start navigation | "Drive to India Gate" | Google Maps starts turn-by-turn navigation, not just the route preview | never |
+| Maps: walking | "Walking directions to India Gate" | Maps shows the walking route | never |
+| Maps: bike | "Bike directions to India Gate" | Maps shows the two-wheeler route | never |
+| Maps: public transport | "Bus route to India Gate" | Maps shows bus, train or metro routes | never |
+| Maps: near me | "Find petrol pump near me" | Maps lists petrol pumps around you | never |
+
 ## Safety
 | Feature | Say or do | Should happen | Last passed |
 |---|---|---|---|
